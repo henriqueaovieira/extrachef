@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { LoadingSkeleton } from '@/app/components/ui';
 import CheckinClient from './checkin-client';
 
 async function CheckinContent({
@@ -17,7 +18,7 @@ export default function CheckinPage({
   params: Promise<{ jobId: string }>;
 }) {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-gray-50 p-8 text-center text-sm text-gray-500">Carregando check-in...</main>}>
+    <Suspense fallback={<main className="min-h-screen bg-gray-50 p-4"><LoadingSkeleton label="Carregando check-in" /></main>}>
       <CheckinContent params={params} />
     </Suspense>
   );

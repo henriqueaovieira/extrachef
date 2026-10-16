@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useCommunication } from '@/app/components/communication-state';
 
 type UserRole = 'restaurant' | 'worker';
 
@@ -10,43 +11,56 @@ const navigationItems: Record<UserRole, Array<{ href: string; label: string; ico
     { href: '/restaurant/dashboard', label: 'Início', icon: '🏠' },
     { href: '/restaurant/dashboard/jobs/create', label: 'Vagas', icon: '💼' },
     { href: '/restaurant/candidates#chats', label: 'Chat', icon: '💬' },
+    { href: '/notifications', label: 'Avisos', icon: '🔔' },
     { href: '/restaurant/profile', label: 'Perfil', icon: '👤' },
   ],
   worker: [
     { href: '/worker/dashboard', label: 'Início', icon: '🏠' },
     { href: '/worker/dashboard#jobs', label: 'Vagas', icon: '💼' },
     { href: '/worker/applications#chats', label: 'Chat', icon: '💬' },
+    { href: '/notifications', label: 'Avisos', icon: '🔔' },
     { href: '/worker/profile', label: 'Perfil', icon: '👤' },
   ],
 };
 
 export default function MobileBottomNav({ role }: { role: UserRole }) {
   const pathname = usePathname();
+  const { counts, error, chatError } = useCommunication();
 
   return (
     <nav
       aria-label="Navegação principal"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(17,24,39,0.06)] backdrop-blur md:hidden"
+      className="ec-mobile-nav fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(17,24,39,0.06)] backdrop-blur md:hidden"
     >
-      <div className="mx-auto grid min-h-16 max-w-xl grid-cols-4 px-1">
+      <div className="mx-auto grid min-h-16 max-w-xl grid-cols-5 px-1">
         {navigationItems[role].map((item) => {
           const itemPath = item.href.split('#')[0];
           const isChatRoute = item.label === 'Chat' && pathname.startsWith('/chat/');
           const isActive = pathname === itemPath || pathname.startsWith(`${itemPath}/`) || isChatRoute;
+          const unread = item.label === 'Chat' ? counts.messages : item.label === 'Avisos' ? counts.notifications : null;
 
           return (
             <Link
               key={item.href}
               href={item.href}
               aria-current={isActive ? 'page' : undefined}
+              aria-label={unread !== null && unread > 0 ? `${item.label}: ${unread} não lidas` : item.label}
+              title={item.label === 'Chat' ? chatError || undefined : item.label === 'Avisos' ? error || undefined : undefined}
               className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-center transition ${isActive ? 'text-orange-700' : 'text-gray-500 hover:text-gray-800'}`}
             >
-              <span aria-hidden="true" className="text-lg leading-5">{item.icon}</span>
-              <span className="truncate text-[10px] font-semibold leading-4 xs:text-[11px]">{item.label}</span>
+              <span aria-hidden="true" className="relative text-lg leading-5">{item.icon}
+                {unread !== null && unread > 0 && (
+                  <span className="absolute -right-4 -top-2 min-w-4 rounded-full bg-red-600 px-1 text-[9px] leading-4 text-white">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
+              </span>
+              <span className="max-w-full truncate text-[10px] font-semibold leading-4 xs:text-[11px]">{item.label}</span>
             </Link>
           );
         })}
       </div>
+      {chatError && <p role="status" className="px-3 pb-1 text-center text-xs text-red-700">{chatError}</p>}
     </nav>
   );
 }

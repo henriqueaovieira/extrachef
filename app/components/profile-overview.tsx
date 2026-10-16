@@ -1,11 +1,15 @@
 'use client';
 
+import { LoadingSkeleton, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import PushNotificationControl from '@/app/components/push-notification-control';
+import LogoutButton from '@/app/components/logout-button';
+import ProfileProgress from '@/app/components/profile-progress';
+import { getProfileProgress } from '@/lib/ui/profile-progress';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -25,6 +29,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
   const [profile, setProfile] = useState<ProfileView | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [progress, setProgress] = useState<ReturnType<typeof getProfileProgress> | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -40,7 +45,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
       }
 
       const { data: user, error: userError } = await supabase
-        .from('users')
+        .from('public_user_directory')
         .select('name, role, city, score')
         .eq('id', authData.user.id)
         .single();
@@ -59,6 +64,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
           .select('*')
           .eq('user_id', authData.user.id)
           .maybeSingle();
+        if (isMounted && !error) setProgress(getProfileProgress(role, user.name, data ?? { city: user.city }));
         if (error) {
           if (isMounted) setErrorMessage(error.message);
         } else if (data) {
@@ -100,15 +106,19 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
           .select('*')
           .eq('user_id', authData.user.id)
           .maybeSingle();
+        if (isMounted && !error) setProgress(getProfileProgress(role, data?.trade_name ?? user.name, data ?? { city: user.city }));
         if (error) {
           if (isMounted) setErrorMessage(error.message);
         } else if (data) {
-          const imageUrl = data.logo_path
-            ? supabase.storage.from('restaurant-assets').getPublicUrl(data.logo_path).data.publicUrl
+          const logo = data.logo_path
+            ? await supabase.storage.from('restaurant-assets').createSignedUrl(data.logo_path, 300)
             : null;
-          const gallery = (data.company_photos ?? []).map((path: string) => (
-            supabase.storage.from('restaurant-assets').getPublicUrl(path).data.publicUrl
-          ));
+          const imageUrl = logo?.data?.signedUrl ?? null;
+          const photos = await Promise.all((data.company_photos ?? []).map(async (path: string) => {
+            const signed = await supabase.storage.from('restaurant-assets').createSignedUrl(path, 300);
+            return signed.data?.signedUrl ?? null;
+          }));
+          const gallery = photos.filter((url): url is string => Boolean(url));
           if (isMounted) {
             setProfile({
               name: data.trade_name,
@@ -154,11 +164,12 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
           <Link href={dashboardHref} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Início</Link>
         </header>
 
+        {!loading && !errorMessage && progress && <ProfileProgress progress={progress} />}
         {loading ? (
-          <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">Carregando perfil...</p>
+          <LoadingSkeleton label="Carregando perfil..." />
         ) : errorMessage ? (
           <div className="space-y-4 rounded-xl border border-red-200 bg-white p-6">
-            <p role="alert" className="text-sm text-red-700">{errorMessage}</p>
+            <Toast tone="error">{errorMessage}</Toast>
             {errorMessage.includes('Entre') && <Link href="/login" className="inline-flex min-h-12 items-center font-semibold text-orange-700">Fazer login</Link>}
           </div>
         ) : !profile ? (
@@ -202,7 +213,17 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
             )}
           </article>
         )}
-        {profile && <PushNotificationControl />}
+        {profile && (
+          <>
+            <PushNotificationControl />
+            <Link href="/settings/privacy" className="flex min-h-12 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">
+              Preferências de notificações e privacidade
+            </Link>
+          </>
+        )}
+      </section>
+      <section className="mx-auto mt-6 max-w-2xl">
+        <LogoutButton />
       </section>
       {profile && <MobileBottomNav role={profile.role} />}
     </main>

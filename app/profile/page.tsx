@@ -1,10 +1,11 @@
 'use client';
 
+import { LoadingSkeleton, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import LogoutButton from '@/app/components/logout-button';
 
 interface UserProfile {
   name: string;
@@ -18,8 +19,6 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
-  const [signingOut, setSigningOut] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     let isMounted = true;
@@ -35,7 +34,7 @@ export default function ProfilePage() {
       }
 
       const { data, error } = await supabase
-        .from('users')
+        .from('public_user_directory')
         .select('name, city, score, role')
         .eq('id', authData.user.id)
         .single();
@@ -52,13 +51,6 @@ export default function ProfilePage() {
     };
   }, [supabase]);
 
-  const signOut = async () => {
-    setSigningOut(true);
-    await supabase.auth.signOut();
-    router.replace('/login');
-    router.refresh();
-  };
-
   const roleLabel = profile?.role === 'restaurant' ? 'Restaurante' : 'Profissional';
 
   return (
@@ -70,10 +62,10 @@ export default function ProfilePage() {
         </header>
 
         {loading ? (
-          <p className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500">Carregando perfil...</p>
+          <LoadingSkeleton label="Carregando perfil..." />
         ) : errorMessage ? (
           <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6">
-            <p role="alert" className="text-sm text-gray-700">{errorMessage}</p>
+            <Toast tone="error">{errorMessage}</Toast>
             <Link href="/login" className="inline-flex min-h-12 items-center font-semibold text-orange-700">Fazer login</Link>
           </div>
         ) : profile ? (
@@ -99,14 +91,7 @@ export default function ProfilePage() {
               </div>
             </dl>
 
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              disabled={signingOut}
-              className="inline-flex min-h-12 w-full items-center justify-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 disabled:opacity-50"
-            >
-              {signingOut ? 'Saindo...' : 'Sair da conta'}
-            </button>
+            <LogoutButton />
           </article>
         ) : null}
       </section>

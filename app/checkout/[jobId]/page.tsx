@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import { LoadingSkeleton } from '@/app/components/ui';
 import CheckoutClient from './checkout-client';
 
 async function CheckoutContent({
@@ -17,7 +18,7 @@ export default function CheckoutPage({
   params: Promise<{ jobId: string }>;
 }) {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-gray-50 p-8 text-center text-sm text-gray-500">Carregando finalização...</main>}>
+    <Suspense fallback={<main className="min-h-screen bg-gray-50 p-4"><LoadingSkeleton label="Carregando finalização" /></main>}>
       <CheckoutContent params={params} />
     </Suspense>
   );

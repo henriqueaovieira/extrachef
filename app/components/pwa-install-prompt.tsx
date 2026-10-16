@@ -1,5 +1,6 @@
 'use client';
 
+import { Button } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -77,30 +78,30 @@ export default function PwaInstallPrompt() {
         )}
       </div>
       {installEvent ? (
-        <button
+        <Button variant="primary"
           type="button"
           onClick={() => void installApp()}
-          className="min-h-11 shrink-0 rounded-lg bg-orange-700 px-3 text-sm font-semibold text-white transition hover:bg-orange-800"
+          className="shrink-0 px-3 text-sm"
         >
           Instalar
-        </button>
+        </Button>
       ) : (
-        <button
+        <Button
           type="button"
           onClick={() => setShowIosHelp((current) => !current)}
           className="min-h-11 shrink-0 rounded-lg border border-gray-300 px-3 text-sm font-semibold text-gray-800"
         >
           Como
-        </button>
+        </Button>
       )}
-      <button
+      <Button
         type="button"
         aria-label="Dispensar instalação"
         onClick={() => setDismissed(true)}
         className="flex size-11 shrink-0 items-center justify-center rounded-lg text-lg text-gray-500 hover:bg-gray-100"
       >
         ×
-      </button>
+      </Button>
     </aside>
   );
 }

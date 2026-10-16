@@ -1,10 +1,13 @@
 'use client';
 
+import { Badge, Button, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
-import NotificationBell from '@/app/components/notification-bell';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import CommunicationNavigation from '@/app/components/communication-navigation';
+import { getDeviceCoordinates, type DeviceCoordinates } from '@/lib/geolocation';
+import { distanceMeters, estimatedDistance } from '@/lib/work-location';
 
 interface Job {
   id: string;
@@ -15,6 +18,13 @@ interface Job {
   end_time: string;
   value: number;
   status: string;
+  work_address: string | null;
+  work_number: string | null;
+  work_city: string | null;
+  work_state: string | null;
+  work_latitude: number | null;
+  work_longitude: number | null;
+  location_name: string | null;
   restaurant?: {
     name: string;
     city?: string;
@@ -51,6 +61,10 @@ export default function WorkerDashboardPage() {
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [supabase] = useState(() => createClient());
+  const [workerLocation, setWorkerLocation] = useState<DeviceCoordinates | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const [jobsError, setJobsError] = useState('');
 
   useEffect(() => {
     let isMounted = true;
@@ -67,11 +81,11 @@ export default function WorkerDashboardPage() {
       const userId = authData.user.id;
 
       const [profileResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
-        supabase.from('users').select('name, city, score').eq('id', userId).single(),
+        supabase.from('public_user_directory').select('name, city, score').eq('id', userId).single(),
         supabase.from('applications').select('job_id').eq('worker_id', userId),
         supabase
           .from('jobs')
-          .select('id, title, description, job_date, start_time, end_time, value, status, restaurant:users!restaurant_id(name, city)')
+          .select('id, title, description, job_date, start_time, end_time, value, status, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
           .eq('status', 'open')
           .order('job_date', { ascending: true }),
         supabase.rpc('get_worker_dashboard_stats'),
@@ -85,6 +99,7 @@ export default function WorkerDashboardPage() {
         setAppliedJobIds(applicationsResult.data.map((application) => application.job_id));
       }
       if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
+      if (jobsResult.error) setJobsError(`Não foi possível carregar as vagas: ${jobsResult.error.message}`);
       if (!statsResult.error) {
         const result = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as WorkerStats | null;
         if (result) setStats(result);
@@ -155,7 +170,7 @@ export default function WorkerDashboardPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500">
-        Carregando vagas disponíveis...
+        <LoadingSkeleton label="Carregando vagas disponíveis" />
       </div>
     );
   }
@@ -182,10 +197,10 @@ export default function WorkerDashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 min-h-16 flex flex-wrap gap-3 py-2 items-center justify-between">
           <div className="font-bold text-xl text-orange-600">🍳 ExtraChef</div>
+          <CommunicationNavigation role="worker" />
           <div className="flex items-center gap-3">
-            <NotificationBell />
             <Link href="/worker/applications" className="hidden text-sm font-medium text-gray-700 hover:text-orange-600 md:inline-flex">
               Minhas Candidaturas
             </Link>
@@ -260,15 +275,23 @@ export default function WorkerDashboardPage() {
 
         <div id="vagas" className="space-y-4">
           <h2 className="text-xl font-bold text-gray-900">Vagas Abertas</h2>
+          <Button disabled={locating} busy={locating} onClick={() => {
+            setLocating(true); setLocationError('');
+            void getDeviceCoordinates().then(setWorkerLocation).catch((error: unknown) => {
+              setLocationError(error instanceof Error ? error.message : 'Não foi possível obter sua localização.');
+            }).finally(() => setLocating(false));
+          }}>Mostrar distâncias estimadas (opcional)</Button>
+          <p className="text-sm text-gray-600">Localização opcional, usada apenas para distância em linha reta. Não limita vagas ou candidaturas.</p>
+          {locationError && <Toast tone="error">{locationError} Você pode continuar se candidatando normalmente.</Toast>}
 
           {feedbackMessage && (
-            <p role="status" className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">{feedbackMessage}</p>
+            <Toast tone="info">{feedbackMessage}</Toast>
           )}
 
-          {jobs.length === 0 ? (
-            <div className="bg-white rounded-2xl p-12 text-center border border-gray-100 shadow-sm text-gray-500">
-              Nenhuma vaga aberta no momento. Volte em breve!
-            </div>
+          {jobsError ? <Toast tone="error">{jobsError}</Toast> : jobs.length === 0 ? (
+            <EmptyState icon="◇" title="Novas oportunidades vêm por aí"
+              description="Não há plantões abertos agora. Enquanto isso, deixe seu perfil pronto para a próxima oportunidade."
+              action={<Link href="/worker/profile/edit" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Revisar meu perfil</Link>} />
           ) : (
             <div className="grid gap-4">
               {jobs.map((job) => {
@@ -283,12 +306,21 @@ export default function WorkerDashboardPage() {
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-3">
                         <h3 className="text-lg font-bold text-gray-900">{job.title}</h3>
-                        <span className="text-xs font-bold px-3 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">
+                        <Badge tone="success">
                           Aberta
-                        </span>
+                        </Badge>
                       </div>
 
                       <p className="text-sm text-gray-600">{job.description}</p>
+                      {job.work_address && <p className="text-sm text-gray-700">{job.location_name} · {job.work_address} {job.work_number} · {job.work_city}/{job.work_state}</p>}
+                      {workerLocation && job.work_latitude !== null && job.work_longitude !== null && (
+                        <p className="text-sm font-semibold text-gray-700">📍 Distância estimada: {estimatedDistance(distanceMeters(
+                          workerLocation.latitude, workerLocation.longitude, job.work_latitude, job.work_longitude,
+                        ))} (linha reta)</p>
+                      )}
+                      {workerLocation && (job.work_latitude === null || job.work_longitude === null) && (
+                        <p className="text-sm text-gray-600">Distância indisponível: coordenadas da vaga não cadastradas.</p>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 pt-1 font-medium">
                         <span>🏢 {job.restaurant?.name || 'Estabelecimento'}</span>
@@ -304,22 +336,22 @@ export default function WorkerDashboardPage() {
                           Candidatura Enviada
                         </span>
                       ) : (
-                        <button
+                        <Button variant="primary"
                           type="button"
                           onClick={() => handleApply(job.id)}
                           disabled={isProcessing}
-                          className="min-h-12 w-full rounded-xl bg-orange-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-orange-700 disabled:opacity-50"
+                          className="w-full px-6 py-2.5 text-sm shadow-sm"
                         >
                           {isProcessing ? 'Enviando...' : 'Candidatar-se'}
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button
                         type="button"
                         onClick={() => void shareJob(job)}
                         className="min-h-12 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-800 transition hover:bg-gray-50"
                       >
                         Compartilhar vaga
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 );

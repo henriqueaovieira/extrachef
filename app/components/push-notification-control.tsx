@@ -1,16 +1,11 @@
 'use client';
 
+import { Button } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { decodeVapidKey, rememberPushChoice } from '@/lib/push-device';
 
 type PushStatus = 'loading' | 'unsupported' | 'unconfigured' | 'ready' | 'error';
-
-function decodeVapidKey(value: string) {
-  const padding = '='.repeat((4 - value.length % 4) % 4);
-  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(base64);
-  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
-}
 
 export default function PushNotificationControl() {
   const [supabase] = useState(() => createClient());
@@ -18,12 +13,40 @@ export default function PushNotificationControl() {
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [diagnostic, setDiagnostic] = useState('');
   const vapidPublicKey = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY;
 
   useEffect(() => {
     let isMounted = true;
 
     async function checkSupport() {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (token) {
+        try {
+          const response = await fetch('/api/push/status', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const statusData = await response.json() as {
+            environment?: Record<string, boolean>;
+            registeredDevices?: number;
+            deliveries?: Array<{ status: string }>;
+          };
+          if (!response.ok) {
+            if (isMounted) setDiagnostic(`Diagnóstico do servidor indisponível (HTTP ${response.status}).`);
+          } else if (isMounted) {
+            const missing = Object.entries(statusData.environment ?? {})
+              .filter(([, configured]) => !configured)
+              .map(([name]) => name);
+            setDiagnostic(missing.length > 0
+              ? `Configuração ausente no servidor: ${missing.join(', ')}.`
+              : `${statusData.registeredDevices ?? 0} dispositivo(s) registrado(s). Últimas entregas: ${(statusData.deliveries ?? []).map((item) => item.status).slice(0, 5).join(', ') || 'nenhuma'}.`);
+          }
+        } catch {
+          if (isMounted) setDiagnostic('Não foi possível consultar o status do Push no servidor.');
+        }
+      }
+
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
         if (isMounted) setStatus('unsupported');
         return;
@@ -53,7 +76,7 @@ export default function PushNotificationControl() {
     return () => {
       isMounted = false;
     };
-  }, [vapidPublicKey]);
+  }, [supabase, vapidPublicKey]);
 
   const updateSubscription = async () => {
     if (busy || !vapidPublicKey) return;
@@ -61,6 +84,10 @@ export default function PushNotificationControl() {
     setMessage('');
 
     try {
+      if (!enabled && Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') throw new Error('Permita notificações nas configurações do navegador.');
+      }
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
       if (!token) throw new Error('Entre novamente para configurar notificações.');
@@ -76,11 +103,10 @@ export default function PushNotificationControl() {
         });
         if (!response.ok) throw new Error('Não foi possível remover a inscrição de notificações.');
         await existingSubscription.unsubscribe();
+        rememberPushChoice(sessionData.session!.user.id, false);
         setEnabled(false);
         setMessage('Notificações push desativadas neste dispositivo.');
       } else {
-        const permission = await Notification.requestPermission();
-        if (permission !== 'granted') throw new Error('Permita notificações nas configurações do navegador.');
         const subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: decodeVapidKey(vapidPublicKey),
@@ -94,6 +120,7 @@ export default function PushNotificationControl() {
           await subscription.unsubscribe();
           throw new Error('Não foi possível salvar a inscrição de notificações.');
         }
+        rememberPushChoice(sessionData.session!.user.id, true);
         setEnabled(true);
         setMessage('Notificações push ativadas neste dispositivo.');
       }
@@ -102,6 +129,16 @@ export default function PushNotificationControl() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const testPush = async () => {
+    setBusy(true); setMessage('');
+    try {
+      const { data, error } = await supabase.rpc('request_push_test');
+      if (error) throw new Error(error.message);
+      setMessage(`Teste criado: ${data}. Minimize o app para testar o alerta do sistema e confira o diagnóstico após retornar.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível iniciar o teste.'); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -115,16 +152,18 @@ export default function PushNotificationControl() {
       ) : status === 'unconfigured' ? (
         <p className="text-sm text-gray-500">Instale o ExtraChef e configure Web Push neste ambiente para ativar notificações.</p>
       ) : (
-        <button
+        <Button
           type="button"
           onClick={() => void updateSubscription()}
           disabled={busy || status === 'loading' || status === 'error'}
           className="inline-flex min-h-12 w-full items-center justify-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 transition hover:bg-gray-50 disabled:opacity-50"
         >
           {status === 'loading' ? 'Verificando...' : busy ? 'Atualizando...' : enabled ? 'Desativar neste dispositivo' : 'Ativar neste dispositivo'}
-        </button>
+        </Button>
       )}
       {message && <p role="status" className="text-sm text-gray-600">{message}</p>}
+      {status === 'ready' && enabled && <Button type="button" disabled={busy} onClick={() => void testPush()} className="min-h-12 w-full">Enviar notificação de teste</Button>}
+      {diagnostic && <p role="status" className="rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-600">{diagnostic}</p>}
     </section>
   );
 }

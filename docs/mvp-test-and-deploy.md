@@ -1,6 +1,15 @@
 # ExtraChef MVP: testes e deploy
 
+## Comunicação e privacidade
+
+Antes deste release, seguir `docs/push-privacy-runbook.md` e aplicar as migrations pendentes até `20261015090000_privacy_account_rights.sql` em homologação. Confirmar os registros próprios em `push_deliveries`, teste em aparelhos reais e revisão jurídica dos documentos-base de `/privacy` e `/terms`. A nova migration torna `restaurant-assets` privado e deve ser publicada junto com o cliente atualizado.
+
 ## Checklist de testes
+
+Para a fundacao de autenticacao, ordem de implantacao e testes de redirects/sessoes, consulte
+[Fundacao de autenticacao](./foundation-auth.md).
+Para padroes visuais, componentes e checklist mobile/acessibilidade, consulte
+[Design System e auditoria UX](./design-system.md).
 
 ### Restaurante
 
@@ -12,6 +21,16 @@
 - [ ] Receber notificações de aprovação, mensagem, check-in, check-out e avaliação.
 - [ ] Após o checkout, avaliar o trabalhador; confirmar que a nota aparece e que não é possível duplicá-la.
 - [ ] Conferir total de vagas, estados, profissionais contratados e média das avaliações no dashboard.
+- [ ] Criar evento; confirmar que aparece em `/restaurant/events` e em “Próximos eventos” no dashboard.
+- [ ] Validar a [Fase 2 de locais em eventos](./event-location-snapshots.md): local opcional, cópia independente, três estados e preservação do snapshot após edição/arquivamento da origem.
+- [ ] Abrir Eventos sem sessão: manter o aviso de login visível e o botão de criação desabilitado.
+- [ ] Alterar/encerrar a sessão depois de abrir o formulário: confirmar erro explícito no envio, sem inserir com a identidade anterior.
+- [ ] Simular falha na requisição de salvar evento: confirmar erro visível e botão liberado para tentar novamente, sem mensagem de sucesso.
+- [ ] Enviar formulário de evento incompleto: confirmar validação nativa e aviso dos campos obrigatórios.
+- [ ] Editar evento, mudar status para cancelado/concluído e confirmar atualização da lista/dashboard.
+- [ ] Excluir evento próprio e confirmar que desaparece das listagens.
+- [ ] Tentar evento com público zero/fracionário, horário final anterior ao inicial e título fora do tamanho; confirmar rejeição no formulário/banco.
+- [ ] Com outra conta de restaurante, tentar ler/editar/excluir o evento; confirmar bloqueio por RLS.
 
 ### Trabalhador
 
@@ -26,7 +45,7 @@
 - [ ] Avaliar o restaurante; confirmar atualização do score e bloqueio de duplicidade.
 - [ ] Conferir candidaturas, diárias concluídas, média, score e histórico no dashboard.
 - [ ] Completar/editar perfil com CPF, RG, foto, selfie, certificados e currículo; confirmar validação e upload privado.
-- [ ] Recusar GPS e confirmar que check-in é bloqueado; testar coordenadas dentro e fora do raio de 300 m.
+- [ ] Recusar GPS e confirmar que check-in/out são bloqueados, sem impedir busca ou candidatura; testar dentro/fora de 200 m em vagas novas e 300 m nas antigas.
 - [ ] Compartilhar uma vaga pelo menu nativo; testar também o fallback de cópia.
 - [ ] Ativar Push no Perfil e confirmar recebimento/clique após aprovação, mensagem e avaliação.
 
@@ -34,7 +53,8 @@
 
 - [ ] Completar/editar perfil com CNPJ, endereço, logo e fotos; confirmar rejeição de CNPJ inválido.
 - [ ] Capturar foto pela câmera traseira e testar substituição dos arquivos.
-- [ ] Criar vaga com localização e validar check-in/out no endereço cadastrado.
+- [ ] Validar o [catálogo independente Meus Locais](./work-locations.md): cadastro sem coordenadas, edição, padrão, arquivamento, restauração e exclusão.
+- [ ] Não aplicar a proposta operacional suspensa. Integrar somente eventos conforme a migration separada da Fase 2; vagas, GPS e geocodificação continuam fora do escopo.
 
 ### Segurança e interface
 
@@ -55,17 +75,18 @@ Copie `.env.example` para `.env.local` em desenvolvimento e preencha:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: chave publicável/anon do projeto.
 - `NEXT_PUBLIC_APP_URL`: origem pública HTTPS do ExtraChef, sem barra final.
 - `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`: chave pública VAPID usada pelo navegador.
+- `WEB_PUSH_VAPID_PUBLIC_KEY`: a mesma chave pública, disponível também no servidor para validar a configuração do dispatcher.
 - `SUPABASE_SERVICE_ROLE_KEY`: chave privada usada somente nas rotas server-side de push.
 - `WEB_PUSH_VAPID_PRIVATE_KEY`: chave privada VAPID, somente no servidor.
 - `WEB_PUSH_SUBJECT`: contato VAPID, por exemplo `mailto:suporte@seudominio.com`.
 - `PUSH_WEBHOOK_SECRET`: segredo aleatório compartilhado com o Database Webhook.
 
-Não exponha `SUPABASE_SERVICE_ROLE_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` ou `PUSH_WEBHOOK_SECRET` no navegador nem em variáveis `NEXT_PUBLIC_*`.
+Não exponha `SUPABASE_SERVICE_ROLE_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` ou `PUSH_WEBHOOK_SECRET` no navegador nem em variáveis `NEXT_PUBLIC_*`. A chave pública VAPID pode ser pública; use a mesma chave nos dois nomes acima.
 
 ## Vercel
 
 - [ ] Importar o repositório e manter o preset Next.js detectado.
-- [ ] Configurar as duas variáveis de ambiente em Development, Preview e Production.
+- [ ] Configurar as variáveis de ambiente necessárias em Development, Preview e Production; após alterá-las, criar novo deployment.
 - [ ] Confirmar o comando de build `npm run build`.
 - [ ] Fazer deploy de Preview e testar login, dashboards, notificações e o fluxo completo de uma diária.
 - [ ] Configurar domínio de produção e HTTPS.
@@ -77,13 +98,76 @@ Não exponha `SUPABASE_SERVICE_ROLE_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY` ou `PUSH_
 - [ ] Confirmar backup e projeto/ambiente correto antes de executar SQL.
 - [ ] Aplicar migrations em ordem cronológica, após o schema-base de `users`, `jobs` e `applications`.
 - [ ] Confirmar que o schema-base e suas policies RLS estão versionados/aplicados; as migrations deste MVP não criam `users`, `jobs` e `applications`.
-- [ ] Aplicar migrations nesta ordem: `20261014000000`, `20261014010000`, `20261014015000`, `20261014020000`, `20261014025000`, `20261014030000`, `20261014035000`, `20261014040000`, `20261014050000_profiles_and_geo.sql`, `20261014051000_core_rls.sql`, `20261014055000_profile_summary_push.sql`, `20261014059000_worker_estimated_earnings.sql`, `20261014060000_notification_deep_links.sql`.
+- [ ] Aplicar migrations nesta ordem: `20261014000000`, `20261014010000`, `20261014015000`, `20261014020000`, `20261014025000`, `20261014030000`, `20261014035000`, `20261014040000`, `20261014050000_profiles_and_geo.sql`, `20261014051000_core_rls.sql`, `20261014055000_profile_summary_push.sql`, `20261014059000_worker_estimated_earnings.sql`, `20261014060000_notification_deep_links.sql`, `20261015000000_notification_delivery_and_preferences.sql`.
+- [ ] Aplicar `20261015010000_restaurant_events.sql` após o schema-base de `public.users`.
+- [ ] Para a Fase 2, após revisão/autorização, aplicar somente `20261015070000_event_location_snapshots.sql`, verificando o contrato real de events e a Fase 1 já aplicada (`20261015060000_work_locations_catalog.sql`). Não reaplicar dependências confirmadas nem todo o histórico. Seguir o [roteiro específico](./event-location-snapshots.md) e publicar o frontend compatível em janela controlada.
+- [ ] Aplicar `20261015020000_auth_foundation.sql` antes de publicar o novo fluxo de cadastro; configurar `/auth/callback` nas Redirect URLs do Supabase.
 - [ ] Executar as migrations `20261014015000` e `20261014025000` separadamente das migrations que usam os novos valores de enum; aguardar commit entre execuções.
 - [ ] Confirmar RLS e policies nas tabelas usadas pela aplicação.
 - [ ] Em **Database > Publications**, confirmar `messages` e `notifications` em `supabase_realtime`.
 - [ ] Configurar Auth Site URL e Redirect URLs para produção e Preview.
-- [ ] Em Database > Webhooks, criar webhook `INSERT` em `public.notifications` apontando para `POST https://SEU_DOMINIO/api/push/dispatch` com header `x-extra-chef-webhook-secret: <PUSH_WEBHOOK_SECRET>`.
-- [ ] Gerar chaves com `npx web-push generate-vapid-keys`; configurar a chave pública também como `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`.
+- [ ] Em Database > Webhooks, criar webhook `INSERT` em `public.notifications` apontando para `POST https://SEU_DOMINIO/api/push/dispatch` com header `x-extra-chef-webhook-secret: <PUSH_WEBHOOK_SECRET>`. O endpoint aceita o payload padrão do Database Webhook e retorna 401, 400, 500/502 ou 503 explicitamente quando há falha.
+- [ ] Gerar chaves com `npx web-push generate-vapid-keys`; configurar a chave pública como `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY` e `WEB_PUSH_VAPID_PUBLIC_KEY`, a privada como `WEB_PUSH_VAPID_PRIVATE_KEY`.
+- [ ] Acessar `/api/push/status` com sessão autenticada para verificar presença das variáveis server-side e quantidade de dispositivos inscritos; o endpoint não retorna valores secretos.
+- [ ] Em perfil, ativar Push no dispositivo. Ao voltar ao app em foreground, a subscription existente é sincronizada/renovada no servidor.
+- [ ] Consultar `public.push_deliveries` para distinguir envios, subscriptions expiradas e falhas por status HTTP; consultar os logs da Function na Vercel pelo `notificationId` para o erro do provedor.
+- [ ] Em `push_deliveries`, `sent` significa que o serviço Push aceitou o pedido; `received` significa que o Service Worker recebeu/processou o Push e confirmou ao backend. Isso não comprova que o usuário visualizou ou tocou na notificação.
+- [ ] Em um dispositivo de teste inscrito, criar uma notificação de teste no SQL Editor usando o UUID do próprio usuário:
+
+```sql
+INSERT INTO public.notifications (user_id, title, message, category, url)
+VALUES (
+  '<UUID_DO_USUARIO_DE_TESTE>'::uuid,
+  'Teste de Push',
+  'Notificação de validação do ExtraChef.',
+  'event',
+  '/notifications'
+)
+RETURNING id;
+```
+
+- [ ] No navegador/PWA, confirmar `Notification.permission === 'granted'` e verificar:
+
+```js
+const registration = await navigator.serviceWorker.getRegistration('/');
+({
+  serviceWorker: Boolean(registration?.active),
+  subscription: Boolean(await registration?.pushManager.getSubscription()),
+  permission: Notification.permission,
+});
+```
+
+- [ ] Se `notifications` recebe a linha, mas `push_deliveries` não: verificar o Database Webhook e a migration de entrega/preferências.
+- [ ] Se `push_deliveries.status = 'failed'`: consultar HTTP `status_code` e logs da rota `/api/push/dispatch` na Vercel.
+- [ ] Se `status = 'sent'` sem `received`: o serviço Push aceitou, mas o navegador/SW não confirmou; validar permissão, subscription, instalação PWA e execução do Service Worker.
+- [ ] Se `status = 'received'`, o Service Worker processou o evento; se a notificação visual não apareceu, verificar se o app estava focado (nesse estado o Push vira toast in-app) e as configurações de notificações do sistema.
+- [ ] Confirmar que o Database Webhook tem sucesso nas chamadas a `/api/push/dispatch`; resposta 200 com `subscriptions: 0` significa que o destinatário não tem dispositivos inscritos, não que o Push foi entregue.
+- [ ] Para diagnosticar dados, execute:
+
+```sql
+SELECT id, user_id, category, title, read, created_at
+FROM public.notifications
+ORDER BY created_at DESC
+LIMIT 25;
+
+SELECT id, user_id, endpoint, created_at, updated_at
+FROM public.push_subscriptions
+ORDER BY updated_at DESC
+LIMIT 25;
+
+SELECT notification_id, subscription_id, status, status_code, updated_at
+FROM public.push_deliveries
+ORDER BY updated_at DESC
+LIMIT 50;
+
+SELECT user_id, messages_enabled, applications_enabled, reviews_enabled, operations_enabled, events_enabled
+FROM public.notification_preferences;
+
+SELECT event_object_table, trigger_name, action_timing, event_manipulation
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+  AND trigger_name IN ('messages_notify_recipient');
+```
 - [ ] Revisar logs de Database, Auth e API após o primeiro deploy.
 
 ## Segurança de produção

@@ -1,5 +1,6 @@
 'use client';
 
+import { Button, LoadingSkeleton, TextArea, Toast } from '@/app/components/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -127,12 +128,10 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
         </header>
 
         {loading ? (
-          <p className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-            Carregando avaliação...
-          </p>
+          <LoadingSkeleton label="Carregando avaliação..." />
         ) : errorMessage && !context ? (
           <div className="space-y-4 rounded-xl border border-red-200 bg-white p-6">
-            <p role="alert" className="text-sm text-red-700">{errorMessage}</p>
+            <Toast tone="error">{errorMessage}</Toast>
             <Link href="/login" className="text-sm font-semibold text-emerald-700 hover:underline">
               Fazer login
             </Link>
@@ -146,14 +145,10 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
             </div>
 
             {successMessage && (
-              <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-800">
-                ✅ {successMessage}
-              </p>
+              <Toast tone="success">{successMessage}</Toast>
             )}
             {errorMessage && (
-              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {errorMessage}
-              </p>
+              <Toast tone="error">{errorMessage}</Toast>
             )}
 
             {hasReviewed ? (
@@ -172,17 +167,27 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
                   <legend className="mb-2 text-sm font-medium text-gray-700">Nota</legend>
                   <div className="flex gap-1" role="radiogroup" aria-label="Nota de 1 a 5 estrelas">
                     {[1, 2, 3, 4, 5].map((value) => (
-                      <button
+                      <Button
                         key={value}
                         type="button"
                         role="radio"
+                        tabIndex={rating === value || (rating === 0 && value === 1) ? 0 : -1}
                         aria-checked={rating === value}
                         aria-label={`${value} ${value === 1 ? 'estrela' : 'estrelas'}`}
                         onClick={() => setRating(value)}
-                        className={`size-12 rounded-md text-3xl leading-none transition ${rating >= value ? 'text-amber-500' : 'text-gray-300 hover:text-amber-400'}`}
+                        onKeyDown={(event) => {
+                          const offset = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1
+                            : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+                          if (!offset) return;
+                          event.preventDefault();
+                          const next = (value - 1 + offset + 5) % 5 + 1;
+                          setRating(next);
+                          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next - 1]?.focus();
+                        }}
+                        className={`size-12 rounded-md text-3xl leading-none transition ${rating >= value ? 'text-amber-700' : 'text-gray-500 hover:text-amber-700'}`}
                       >
                         ★
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 </fieldset>
@@ -191,25 +196,25 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
                   <label htmlFor="review-comment" className="mb-2 block text-sm font-medium text-gray-700">
                     Comentário <span className="font-normal text-gray-400">(opcional)</span>
                   </label>
-                  <textarea
+                  <TextArea
                     id="review-comment"
                     value={comment}
                     onChange={(event) => setComment(event.target.value)}
                     maxLength={2000}
                     rows={4}
                     placeholder="Compartilhe um comentário sobre a diária..."
-                    className="w-full resize-y rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                    className="w-full resize-y"
                   />
                   <p className="mt-1 text-right text-xs text-gray-400">{comment.length}/2000</p>
                 </div>
 
-                <button
+                <Button variant="primary"
                   type="submit"
                   disabled={sending || rating === 0}
-                  className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-emerald-700 px-5 py-3 text-base font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex w-full items-center justify-center px-5 py-3 text-base"
                 >
                   {sending ? 'Enviando...' : 'Enviar Avaliação'}
-                </button>
+                </Button>
               </form>
             )}
           </article>

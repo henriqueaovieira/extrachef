@@ -1,6 +1,11 @@
+
+import { LoadingSkeleton } from '@/app/components/ui';
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import PwaInstallPrompt from "@/app/components/pwa-install-prompt";
+import NotificationExperience from "@/app/components/notification-experience";
+import SessionGuard from "@/app/components/session-guard";
+import { Suspense } from "react";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,6 +41,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: "#C95E32",
   colorScheme: "light",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -45,7 +51,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
+        <Suspense fallback={<LoadingSkeleton label="Carregando..." />}>
+          <NotificationExperience>
+            <SessionGuard>{children}</SessionGuard>
+          </NotificationExperience>
+        </Suspense>
         <PwaInstallPrompt />
       </body>
     </html>

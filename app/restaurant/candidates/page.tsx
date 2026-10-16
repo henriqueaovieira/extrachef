@@ -1,9 +1,11 @@
 'use client';
 
+import { Badge, Button, EmptyState, LoadingSkeleton } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import CommunicationNavigation from '@/app/components/communication-navigation';
 
 interface Application {
   job_id: string;
@@ -81,13 +83,6 @@ export default function RestaurantCandidatesPage() {
     }
   };
 
-  const statusBadgeClasses: Record<string, string> = {
-    pending: 'border-amber-200 bg-amber-50 text-amber-800',
-    approved: 'border-green-200 bg-green-50 text-green-800',
-    rejected: 'border-red-200 bg-red-50 text-red-800',
-    completed: 'border-blue-200 bg-blue-50 text-blue-800',
-  };
-
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-8 pb-28 sm:px-6 sm:py-10 md:pb-10">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -96,6 +91,7 @@ export default function RestaurantCandidatesPage() {
             <h1 className="text-2xl font-bold text-gray-900">Candidaturas</h1>
             <p className="mt-1 text-sm text-gray-500">Registros enviados para as vagas.</p>
           </div>
+          <CommunicationNavigation role="restaurant" />
           <Link
             href="/restaurant/dashboard"
             className="inline-flex min-h-10 items-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-700"
@@ -111,15 +107,15 @@ export default function RestaurantCandidatesPage() {
         )}
 
         {loading ? (
-          <p className="py-10 text-center text-sm text-gray-500">Carregando candidaturas...</p>
+          <LoadingSkeleton label="Carregando candidaturas..." />
         ) : errorMessage ? (
           <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             Não foi possível carregar as candidaturas: {errorMessage}
           </p>
         ) : applications.length === 0 ? (
-          <p className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-600">
-            Nenhuma candidatura encontrada.
-          </p>
+          <EmptyState icon="◇" title="Nenhuma candidatura encontrada."
+            description="Quando um profissional se candidatar, você poderá acompanhar os registros aqui."
+            action={<Link href="/restaurant/dashboard/jobs/create" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Publicar uma vaga</Link>} />
         ) : (
           <div id="chats" className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
             <table className="w-full min-w-[900px] text-left text-sm">
@@ -142,9 +138,9 @@ export default function RestaurantCandidatesPage() {
                       <td className="break-all px-5 py-4 font-mono text-xs">{application.job_id}</td>
                       <td className="break-all px-5 py-4 font-mono text-xs">{application.worker_id}</td>
                       <td className="px-5 py-4">
-                        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClasses[application.status] ?? 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                        <Badge tone={application.status === 'approved' ? 'success' : application.status === 'rejected' ? 'danger' : application.status === 'pending' ? 'warning' : 'neutral'}>
                           {application.status}
-                        </span>
+                        </Badge>
                       </td>
                       <td className="whitespace-nowrap px-5 py-4">
                         {new Date(application.created_at).toLocaleString('pt-BR')}
@@ -163,14 +159,14 @@ export default function RestaurantCandidatesPage() {
                             Abrir chat
                           </Link>
                         ) : application.status === 'pending' && !jobFilled ? (
-                          <button
+                          <Button variant="primary"
                             type="button"
                             onClick={() => approveApplication(application)}
                             disabled={approvingKey !== null}
-                            className="min-h-12 rounded-md bg-green-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="px-4 py-2 text-sm"
                           >
                             {approvingKey === applicationKey ? 'Aprovando...' : 'Aprovar'}
-                          </button>
+                          </Button>
                         ) : jobFilled && application.status === 'pending' ? (
                           <span className="text-xs text-gray-500">Vaga preenchida</span>
                         ) : null}

@@ -1,9 +1,12 @@
 'use client';
 
+import { Button, EmptyState, LoadingSkeleton, TextArea, Toast } from '@/app/components/ui';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import NotificationBell from '@/app/components/notification-bell';
+import { useCommunication } from '@/app/components/communication-state';
 
 interface ChatContext {
   job_title: string;
@@ -18,6 +21,7 @@ interface Message {
   sender_id: string;
   content: string;
   created_at: string;
+  read_at: string | null;
 }
 
 function sortMessages(messages: Message[]) {
@@ -36,14 +40,45 @@ export default function ChatClient({ jobId }: { jobId: string }) {
   const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [realtimeError, setRealtimeError] = useState('');
+  const [readError, setReadError] = useState('');
+  const [readRetry, setReadRetry] = useState(0);
+  const { markRead, error: communicationError } = useCommunication();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let isMounted = true;
     let channel: ReturnType<typeof supabase.channel> | null = null;
+    let historyVersion = 0;
+
+    async function reloadHistory() {
+      const version = ++historyVersion;
+      const { data: history, error: historyError } = await supabase
+        .from('messages')
+        .select('id, job_id, sender_id, content, created_at, read_at')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: true });
+      if (!isMounted || version !== historyVersion) return;
+      if (historyError) {
+        setErrorMessage('Não foi possível carregar as mensagens da conversa.');
+        return;
+      }
+      setMessages((current) => {
+        const messagesById = new Map<string, Message>();
+        for (const message of [...((history ?? []) as Message[]), ...current]) {
+          const previous = messagesById.get(message.id);
+          messagesById.set(message.id, previous?.read_at && !message.read_at ? previous : message);
+        }
+        return sortMessages([...messagesById.values()]);
+      });
+    }
 
     async function loadChat() {
       try {
+        setLoading(true);
+        setContext(null);
+        setMessages([]);
+        setErrorMessage('');
+        setReadError('');
         const { data: authData, error: authError } = await supabase.auth.getUser();
         if (authError || !authData.user) {
           throw new Error('Entre na sua conta para acessar o chat.');
@@ -69,43 +104,37 @@ export default function ChatClient({ jobId }: { jobId: string }) {
           .on(
             'postgres_changes',
             {
-              event: 'INSERT',
+              event: '*',
               schema: 'public',
               table: 'messages',
               filter: `job_id=eq.${jobId}`,
             },
             (payload) => {
+              if (!isMounted) return;
+              if (payload.eventType === 'DELETE') {
+                setMessages((current) => current.filter((message) => message.id !== payload.old.id));
+                return;
+              }
               const incomingMessage = payload.new as Message;
               setMessages((current) => {
-                if (current.some((message) => message.id === incomingMessage.id)) return current;
+                if (current.some((message) => message.id === incomingMessage.id)) {
+                  return current.map((message) => message.id === incomingMessage.id ? incomingMessage : message);
+                }
                 return sortMessages([...current, incomingMessage]);
               });
             },
           )
           .subscribe((status) => {
+            if (!isMounted) return;
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
               setRealtimeError('Conexão em tempo real interrompida. Tentando reconectar...');
             } else if (status === 'SUBSCRIBED') {
               setRealtimeError('');
+              void reloadHistory();
             }
           });
 
-        const { data: history, error: historyError } = await supabase
-          .from('messages')
-          .select('id, job_id, sender_id, content, created_at')
-          .eq('job_id', jobId)
-          .order('created_at', { ascending: true });
-
-        if (historyError) throw historyError;
-        if (!isMounted) return;
-
-        setMessages((current) => {
-          const messagesById = new Map<string, Message>();
-          for (const message of [...((history ?? []) as Message[]), ...current]) {
-            messagesById.set(message.id, message);
-          }
-          return sortMessages([...messagesById.values()]);
-        });
+        await reloadHistory();
       } catch (error) {
         if (isMounted) {
           setErrorMessage(error instanceof Error ? error.message : 'Não foi possível abrir o chat.');
@@ -127,6 +156,36 @@ export default function ChatClient({ jobId }: { jobId: string }) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
+  useEffect(() => {
+    let active = true;
+    let reading = false;
+    const acknowledge = async () => {
+      if (loading || !context || !currentUserId || reading || document.visibilityState !== 'visible') return;
+      const ids = messages.filter((message) => message.job_id === jobId && message.sender_id !== currentUserId && message.read_at === null)
+        .map((message) => message.id);
+      if (!ids.length) return;
+      reading = true;
+      try {
+        await markRead(jobId, ids);
+        if (!active) return;
+        const acknowledged = new Set(ids);
+        setMessages((current) => current.map((message) => acknowledged.has(message.id)
+          ? { ...message, read_at: new Date().toISOString() } : message));
+        setReadError('');
+      } catch (failure) {
+        if (active) setReadError(failure instanceof Error ? failure.message : 'Não foi possível registrar a leitura.');
+      } finally { reading = false; }
+    };
+    void acknowledge();
+    document.addEventListener('visibilitychange', acknowledge);
+    window.addEventListener('focus', acknowledge);
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', acknowledge);
+      window.removeEventListener('focus', acknowledge);
+    };
+  }, [messages, loading, context, currentUserId, markRead, jobId, readRetry]);
+
   const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const content = draft.trim();
@@ -138,7 +197,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
     const { data, error } = await supabase
       .from('messages')
       .insert({ job_id: jobId, sender_id: currentUserId, content })
-      .select('id, job_id, sender_id, content, created_at')
+      .select('id, job_id, sender_id, content, created_at, read_at')
       .single();
 
     if (error) {
@@ -183,17 +242,18 @@ export default function ChatClient({ jobId }: { jobId: string }) {
               {context.participant_role === 'restaurant' ? 'Restaurante' : 'Trabalhador'}
             </span>
           )}
+          <div className="hidden md:block"><NotificationBell /></div>
         </header>
 
         <div className="flex-1 space-y-4 overflow-y-auto bg-[#f8f9f7] px-4 py-5 sm:px-6">
           {loading ? (
-            <p className="py-10 text-center text-sm text-gray-500">Carregando mensagens...</p>
+            <LoadingSkeleton label="Carregando mensagens..." />
           ) : errorMessage && !context ? (
             <div role="alert" className="mx-auto max-w-lg rounded-xl border border-red-200 bg-white p-5 text-center text-sm text-red-700">
               {errorMessage}
             </div>
           ) : messages.length === 0 ? (
-            <p className="py-10 text-center text-sm text-gray-500">Esta conversa ainda não tem mensagens.</p>
+            <EmptyState icon="↗" title="Comece a conversa" description="Combine os detalhes do plantão. Escreva sua primeira mensagem abaixo." />
           ) : (
             messages.map((message) => {
               const isOwnMessage = message.sender_id === currentUserId;
@@ -230,14 +290,14 @@ export default function ChatClient({ jobId }: { jobId: string }) {
           </p>
         )}
         {errorMessage && context && (
-          <p role="alert" className="border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-            {errorMessage}
-          </p>
+          <Toast tone="error">{errorMessage}</Toast>
         )}
+        {communicationError && <Toast tone="error">{communicationError}</Toast>}
+        {readError && <Toast tone="error">{readError}<Button onClick={() => setReadRetry((current) => current + 1)}>Tentar registrar leitura novamente</Button></Toast>}
 
         <form onSubmit={sendMessage} className="flex items-end gap-3 border-t border-gray-200 bg-white p-3 sm:p-4">
           <label htmlFor="chat-message" className="sr-only">Mensagem</label>
-          <textarea
+          <TextArea
             id="chat-message"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -248,18 +308,21 @@ export default function ChatClient({ jobId }: { jobId: string }) {
               }
             }}
             maxLength={4000}
+            autoComplete="off"
+            enterKeyHint="send"
             rows={1}
             placeholder="Escreva uma mensagem..."
             disabled={!context || loading || sending}
-            className="max-h-32 min-h-12 flex-1 resize-y rounded-xl border border-gray-300 px-4 py-3 text-base text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 disabled:bg-gray-50"
+            className="max-h-32 flex-1 resize-y"
           />
-          <button
+          <Button variant="primary"
             type="submit"
+            busy={sending}
             disabled={!context || loading || sending || !draft.trim()}
-            className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-xl bg-emerald-700 px-5 text-base font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex shrink-0 items-center justify-center px-5 text-base"
           >
             {sending ? 'Enviando...' : 'Enviar'}
-          </button>
+          </Button>
         </form>
       </section>
       {context && <MobileBottomNav role={context.current_user_role} />}

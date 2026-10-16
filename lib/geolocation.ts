@@ -19,7 +19,7 @@ export function getDeviceCoordinates(): Promise<DeviceCoordinates> {
       }),
       (error) => {
         if (error.code === error.PERMISSION_DENIED) {
-          reject(new Error('Permita o acesso à localização para registrar sua presença.'));
+          reject(new Error('Permita o acesso à localização para utilizar este recurso.'));
         } else if (error.code === error.TIMEOUT) {
           reject(new Error('Não foi possível obter sua localização a tempo. Tente novamente.'));
         } else {

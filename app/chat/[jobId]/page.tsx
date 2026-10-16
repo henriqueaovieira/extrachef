@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import ChatClient from './chat-client';
+import { LoadingSkeleton } from '@/app/components/ui';
 
 async function ChatContent({
   params,
@@ -17,7 +18,7 @@ export default function ChatPage({
   params: Promise<{ jobId: string }>;
 }) {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-[#f4f5f2] p-8 text-center text-sm text-gray-500">Carregando conversa...</main>}>
+    <Suspense fallback={<main className="min-h-screen bg-[#f4f5f2] p-4"><LoadingSkeleton label="Carregando conversa" /></main>}>
       <ChatContent params={params} />
     </Suspense>
   );

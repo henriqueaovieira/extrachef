@@ -1,68 +1,72 @@
 'use client';
-
-import { useState } from 'react';
+import { Button, Card, LoadingSkeleton, PasswordInput, TextInput, Toast } from '@/app/components/ui';
+import { Suspense, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { authMessages, sanitizeRedirect } from '@/lib/auth/routes';
+import { getAccountRole } from '@/lib/auth/account';
 
 export default function LoginPage() {
+  return <Suspense fallback={<LoadingSkeleton label="Carregando..." />}><LoginForm /></Suspense>;
+}
+
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const router = useRouter();
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
+  const params = useSearchParams();
+  const requestedRedirect = params.get('redirect');
+  const reasonMessage = authMessages[params.get('reason') ?? ''];
+  const registerHref = requestedRedirect
+    ? `/register?${new URLSearchParams({ redirect: requestedRedirect })}`
+    : '/register';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setErrorMessage('');
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      setErrorMessage(error.message);
-      setLoading(false);
-      return;
-    }
-
-    if (data.user) {
-      const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', data.user.id)
-        .single();
-
-      if (profile?.role === 'restaurant') {
-        router.push('/restaurant/dashboard');
-      } else {
-        router.push('/worker/dashboard');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setErrorMessage(error.message);
+        return;
       }
-      router.refresh();
+      if (!data.user) throw new Error('Não foi possível iniciar sua sessão. Tente novamente.');
+      const role = await getAccountRole(supabase, data.user.id, true);
+      window.location.replace(sanitizeRedirect(requestedRedirect, role));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível entrar. Tente novamente.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-gray-50 px-4 py-6 sm:py-12">
-      <section className="w-full max-w-md space-y-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-8">
+      <Card className="w-full max-w-md space-y-6 sm:p-8">
         <div className="text-center space-y-1">
           <h1 className="text-2xl font-bold text-gray-900">Entrar no ExtraChef</h1>
           <p className="text-sm text-gray-500">Acesse sua conta para continuar</p>
         </div>
 
+        {reasonMessage && <p role="status" className="rounded-xl bg-orange-50 p-3 text-sm text-orange-800">{reasonMessage}</p>}
+        {params.get('warning') === 'device_cleanup_failed' && (
+          <p role="alert" className="rounded-xl bg-orange-50 p-3 text-sm text-orange-800">
+            Sua conta foi desconectada, mas a limpeza do dispositivo não terminou. Revise as notificações nas configurações do navegador.
+          </p>
+        )}
         {errorMessage && (
-          <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 border border-red-200">
-            {errorMessage}
-          </div>
+          <Toast tone="error">{errorMessage}</Toast>
         )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-            <input
+            <label htmlFor="field-login-page-tsx-1" className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+            <TextInput id="field-login-page-tsx-1"
               type="email"
               autoComplete="email"
               autoCapitalize="none"
@@ -71,39 +75,38 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
-              className="min-h-12 w-full rounded-xl border border-gray-300 px-4 py-3 text-base focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+              className="w-full"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-            <input
-              type="password"
+            <label htmlFor="field-login-page-tsx-2" className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+            <PasswordInput id="field-login-page-tsx-2"
               autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              className="min-h-12 w-full rounded-xl border border-gray-300 px-4 py-3 text-base focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
             />
           </div>
 
-          <button
+          <Button variant="primary"
             type="submit"
             disabled={loading}
-            className="min-h-12 w-full rounded-xl bg-orange-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-orange-700 disabled:opacity-50"
+            busy={loading}
+            className="w-full px-4 py-3 text-base shadow-sm"
           >
             {loading ? 'Entrando...' : 'Entrar'}
-          </button>
+          </Button>
         </form>
 
         <p className="text-center text-sm text-gray-500">
           Não tem uma conta?{' '}
-          <Link href="/register" className="font-semibold text-orange-600 hover:underline">
+          <Link href={registerHref} className="font-semibold text-orange-600 hover:underline">
             Cadastre-se
           </Link>
         </p>
-      </section>
+      </Card>
     </main>
   );
 }

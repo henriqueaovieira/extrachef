@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { Button, LoadingSkeleton, MaskedInput, TextArea, TextInput, Toast } from '@/app/components/ui';
+import { useEffect, useState, type ChangeEvent, type ComponentProps, type FormEvent } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import CameraCapture from '@/app/components/camera-capture';
 import { isValidCnpj, isValidCpf, normalizeDocument } from '@/lib/validations/br-documents';
+import ProfileProgress from '@/app/components/profile-progress';
+import { getProfileProgress } from '@/lib/ui/profile-progress';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -76,7 +79,6 @@ const emptyRestaurantProfile: RestaurantProfile = {
   company_photos: [],
 };
 
-const inputClass = 'min-h-12 w-full rounded-lg border border-gray-300 px-4 py-3 text-base text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-orange-600 focus:ring-2 focus:ring-orange-100';
 
 function getFileExtension(file: File) {
   if (file.type === 'application/pdf') return 'pdf';
@@ -117,7 +119,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
 
       const userIdValue = authData.user.id;
       const { data: user, error: userError } = await supabase
-        .from('users')
+        .from('public_user_directory')
         .select('name, role, city')
         .eq('id', userIdValue)
         .single();
@@ -137,7 +139,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       if (role === 'worker') {
         const { data, error } = await supabase
           .from('worker_profiles')
-          .select('*')
+          .select('cpf, rg, date_of_birth, phone, whatsapp, address, city, state, postal_code, bio, experience, specialties, certificates, profile_photo_path, resume_pdf_path, selfie_verification_path')
           .eq('user_id', userIdValue)
           .maybeSingle();
         if (error) setErrorMessage(error.message);
@@ -304,22 +306,28 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
     setRestaurantProfile((current) => ({ ...current, [key]: value }));
   };
 
-  const input = (label: string, value: string, onChange: (value: string) => void, props: Record<string, string | boolean> = {}) => (
-    <label className="block space-y-1.5">
-      <span className="text-sm font-medium text-gray-700">{label}</span>
-      <input {...props} value={value} onChange={(event) => onChange(event.target.value)} required className="min-h-12 w-full rounded-lg border border-gray-300 px-4 py-3 text-base outline-none transition focus:border-orange-600 focus:ring-2 focus:ring-orange-100" />
-    </label>
-  );
+  const input = (label: string, value: string, onChange: (value: string) => void, props: ComponentProps<'input'> = {}) => {
+    const mask = label === 'CPF' ? 'cpf' : label === 'CNPJ' ? 'cnpj'
+      : label === 'CEP' ? 'postal-code' : label === 'Telefone' || label === 'WhatsApp' ? 'phone' : null;
+    return (
+      <label className="block space-y-1.5">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        {mask
+          ? <MaskedInput autoComplete={props.autoComplete} required mask={mask} value={value} onValueChange={onChange} />
+          : <TextInput {...props} value={value} onChange={(event) => onChange(event.target.value)} required />}
+      </label>
+    );
+  };
 
   const fileInput = (label: string, accept: string, onChange: (file: File | null) => void, currentPath?: string, capture?: 'user' | 'environment') => (
     <label className="block space-y-2">
       <span className="text-sm font-medium text-gray-700">{label}</span>
-      <input
+      <TextInput
         type="file"
         accept={accept}
         capture={capture}
         onChange={(event) => onChange(event.target.files?.[0] ?? null)}
-        className="block min-h-12 w-full cursor-pointer rounded-lg border border-gray-300 bg-white text-sm text-gray-700 file:mr-3 file:min-h-12 file:border-0 file:bg-gray-100 file:px-4 file:text-sm file:font-semibold file:text-gray-800"
+        className="w-full"
       />
       <span className="block break-all text-xs text-gray-500">
         {currentPath ? 'Arquivo salvo. Envie outro para substituir.' : 'Opcional; máximo de 10 MB.'}
@@ -328,11 +336,11 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
   );
 
   if (loading) {
-    return <main className="flex min-h-screen items-center justify-center text-sm text-gray-500">Carregando perfil...</main>;
+    return <main className="flex min-h-screen items-center justify-center p-4"><LoadingSkeleton label="Carregando perfil" /></main>;
   }
 
   if (errorMessage && !userId) {
-    return <main className="mx-auto max-w-xl p-6"><p role="alert" className="rounded-lg bg-red-50 p-4 text-sm text-red-700">{errorMessage}</p><Link href="/login" className="mt-4 inline-flex min-h-12 items-center font-semibold text-orange-700">Fazer login</Link></main>;
+    return <main className="mx-auto max-w-xl p-6"><Toast tone="error">{errorMessage}</Toast><Link href="/login" className="mt-4 inline-flex min-h-12 items-center font-semibold text-orange-700">Fazer login</Link></main>;
   }
 
   return (
@@ -346,10 +354,19 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
           <Link href={role === 'worker' ? '/worker/profile' : '/restaurant/profile'} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Cancelar</Link>
         </header>
 
-        {errorMessage && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage}</p>}
-        {successMessage && <p role="status" className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-800">{successMessage}</p>}
+        {errorMessage && <Toast tone="error">{errorMessage}</Toast>}
+        {successMessage && <Toast tone="success">{successMessage}</Toast>}
+        <ProfileProgress progress={getProfileProgress(role, role === 'worker' ? accountName : restaurantProfile.trade_name, role === 'worker' ? {
+          ...workerProfile,
+          profile_photo_path: profilePhotoFile ? 'selected' : workerProfile.profile_photo_path,
+          resume_pdf_path: resumeFile ? 'selected' : workerProfile.resume_pdf_path,
+        } : {
+          ...restaurantProfile,
+          logo_path: logoFile ? 'selected' : restaurantProfile.logo_path,
+        })} />
+        <p className="text-xs text-gray-600">O indicador acompanha o formulário. Salve as alterações para atualizar seu perfil.</p>
 
-        <form onSubmit={saveProfile} className="space-y-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
+        <form onSubmit={saveProfile} className="ec-card space-y-6">
           {role === 'worker' ? (
             <>
               <h2 className="text-lg font-semibold text-gray-900">Dados profissionais</h2>
@@ -362,11 +379,11 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 {input('WhatsApp', workerProfile.whatsapp, (value) => updateWorker('whatsapp', value), { type: 'tel', inputMode: 'tel' })}
                 {input('CEP', workerProfile.postal_code, (value) => updateWorker('postal_code', value), { inputMode: 'numeric', autoComplete: 'postal-code' })}
                 {input('Cidade', workerProfile.city, (value) => updateWorker('city', value), { autoComplete: 'address-level2' })}
-                {input('Estado', workerProfile.state, (value) => updateWorker('state', value), { autoComplete: 'address-level1', maxLength: '2' })}
+                {input('Estado', workerProfile.state, (value) => updateWorker('state', value), { autoComplete: 'address-level1', maxLength: 2 })}
               </div>
               {input('Endereço', workerProfile.address, (value) => updateWorker('address', value), { autoComplete: 'street-address' })}
-              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Bio</span><textarea value={workerProfile.bio} onChange={(event) => updateWorker('bio', event.target.value)} rows={3} maxLength={1200} className={inputClass} /></label>
-              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Experiência</span><textarea value={workerProfile.experience} onChange={(event) => updateWorker('experience', event.target.value)} rows={4} maxLength={3000} className={inputClass} /></label>
+              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Bio</span><TextArea value={workerProfile.bio} onChange={(event) => updateWorker('bio', event.target.value)} rows={3} maxLength={1200}  /></label>
+              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Experiência</span><TextArea value={workerProfile.experience} onChange={(event) => updateWorker('experience', event.target.value)} rows={4} maxLength={3000}  /></label>
               {input('Especialidades (separadas por vírgula)', workerProfile.specialties, (value) => updateWorker('specialties', value))}
 
               <div className="space-y-3 border-t border-gray-100 pt-5">
@@ -378,7 +395,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 {fileInput('Currículo em PDF', 'application/pdf', setResumeFile, workerProfile.resume_pdf_path)}
                 <label className="block space-y-2">
                   <span className="text-sm font-medium text-gray-700">Certificados (PDF ou imagem)</span>
-                  <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={handleCertificates} className="block min-h-12 w-full rounded-lg border border-gray-300 bg-white text-sm file:mr-3 file:min-h-12 file:border-0 file:bg-gray-100 file:px-4" />
+                  <TextInput type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={handleCertificates} className="w-full" />
                   <span className="text-xs text-gray-500">{workerProfile.certificates.length} arquivo(s) salvo(s); até 10 MB por arquivo.</span>
                 </label>
               </div>
@@ -394,10 +411,10 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 {input('WhatsApp', restaurantProfile.whatsapp, (value) => updateRestaurant('whatsapp', value), { type: 'tel', inputMode: 'tel' })}
                 {input('CEP', restaurantProfile.postal_code, (value) => updateRestaurant('postal_code', value), { inputMode: 'numeric', autoComplete: 'postal-code' })}
                 {input('Cidade', restaurantProfile.city, (value) => updateRestaurant('city', value), { autoComplete: 'address-level2' })}
-                {input('Estado', restaurantProfile.state, (value) => updateRestaurant('state', value), { autoComplete: 'address-level1', maxLength: '2' })}
+                {input('Estado', restaurantProfile.state, (value) => updateRestaurant('state', value), { autoComplete: 'address-level1', maxLength: 2 })}
               </div>
               {input('Endereço', restaurantProfile.address, (value) => updateRestaurant('address', value), { autoComplete: 'street-address' })}
-              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Descrição</span><textarea value={restaurantProfile.description} onChange={(event) => updateRestaurant('description', event.target.value)} rows={4} maxLength={2000} className={inputClass} /></label>
+              <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Descrição</span><TextArea value={restaurantProfile.description} onChange={(event) => updateRestaurant('description', event.target.value)} rows={4} maxLength={2000}  /></label>
 
               <div className="space-y-3 border-t border-gray-100 pt-5">
                 <h3 className="font-semibold text-gray-900">Imagens do estabelecimento</h3>
@@ -405,7 +422,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 <CameraCapture label="logo" facingMode="environment" onCapture={setLogoFile} />
                 <label className="block space-y-2">
                   <span className="text-sm font-medium text-gray-700">Fotos do estabelecimento</span>
-                  <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={handleCompanyPhotos} className="block min-h-12 w-full rounded-lg border border-gray-300 bg-white text-sm file:mr-3 file:min-h-12 file:border-0 file:bg-gray-100 file:px-4" />
+                  <TextInput type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={handleCompanyPhotos} className="w-full" />
                   <span className="text-xs text-gray-500">{restaurantProfile.company_photos.length} foto(s) salva(s); até 10 MB por arquivo.</span>
                 </label>
                 <CameraCapture label="foto do estabelecimento" facingMode="environment" onCapture={(file) => setCompanyPhotoFiles((current) => [...current, file])} />
@@ -413,9 +430,9 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
             </>
           )}
 
-          <button type="submit" disabled={saving} className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-orange-700 px-5 text-base font-semibold text-white transition hover:bg-orange-800 disabled:cursor-not-allowed disabled:opacity-50">
+          <Button variant="primary" type="submit" busy={saving} disabled={saving} className="w-full px-5 text-base">
             {saving ? 'Salvando perfil...' : 'Salvar perfil'}
-          </button>
+          </Button>
         </form>
       </section>
     </main>

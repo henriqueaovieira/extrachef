@@ -1,5 +1,6 @@
 'use client';
 
+import { Button, Toast } from '@/app/components/ui';
 import { useEffect, useRef, useState } from 'react';
 
 interface CameraCaptureProps {
@@ -84,16 +85,16 @@ export default function CameraCapture({ label, facingMode = 'user', onCapture }:
         playsInline
         className={`${isStreaming ? 'block' : 'hidden'} aspect-[3/4] max-h-96 w-full rounded-xl bg-gray-950 object-cover`}
       />
-      {errorMessage && <p role="alert" className="text-sm text-red-700">{errorMessage}</p>}
+      {errorMessage && <Toast tone="error">{errorMessage}</Toast>}
       {isStreaming ? (
         <div className="flex gap-3">
-          <button type="button" onClick={capturePhoto} className="min-h-12 flex-1 rounded-lg bg-emerald-700 px-4 text-sm font-semibold text-white">Capturar {label.toLowerCase()}</button>
-          <button type="button" onClick={stopCamera} className="min-h-12 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700">Cancelar</button>
+          <Button variant="primary" type="button" onClick={capturePhoto} className="flex-1 px-4 text-sm">Capturar {label.toLowerCase()}</Button>
+          <Button type="button" onClick={stopCamera} className="min-h-12 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700">Cancelar</Button>
         </div>
       ) : (
-        <button type="button" onClick={() => void startCamera()} className="min-h-12 w-full rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 transition hover:bg-gray-50">
+        <Button type="button" onClick={() => void startCamera()} className="min-h-12 w-full rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 transition hover:bg-gray-50">
           Abrir câmera: {label}
-        </button>
+        </Button>
       )}
     </div>
   );

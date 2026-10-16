@@ -1,9 +1,11 @@
 'use client';
 
+import { Badge, Card, EmptyState, LoadingSkeleton } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import CommunicationNavigation from '@/app/components/communication-navigation';
 
 interface Application {
   id: string;
@@ -82,10 +84,11 @@ export default function WorkerApplicationsPage() {
   return (
     <main className="min-h-screen bg-gray-50 pb-28 md:pb-8">
       <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+        <div className="mx-auto flex min-h-16 max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-2">
           <Link href="/worker/dashboard" className="text-lg font-bold text-orange-600">
             ExtraChef
           </Link>
+          <CommunicationNavigation role="worker" />
           <Link href="/worker/dashboard" className="text-sm font-medium text-gray-700 hover:text-orange-600">
             Voltar às vagas
           </Link>
@@ -99,7 +102,7 @@ export default function WorkerApplicationsPage() {
         </div>
 
         {loading ? (
-          <p className="py-12 text-center text-gray-500">Carregando candidaturas...</p>
+          <LoadingSkeleton label="Carregando candidaturas..." />
         ) : !signedIn ? (
           <div className="rounded-xl border border-gray-200 bg-white p-8 text-center">
             <p className="text-gray-700">Entre na sua conta para ver suas candidaturas.</p>
@@ -112,20 +115,20 @@ export default function WorkerApplicationsPage() {
             Não foi possível carregar suas candidaturas: {errorMessage}
           </p>
         ) : applications.length === 0 ? (
-          <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">
-            Você ainda não se candidatou a nenhuma vaga.
-          </div>
+          <EmptyState icon="◇" title="Sua próxima diária está à frente"
+            description="Você ainda não se candidatou. Explore os plantões e encontre uma oportunidade para o seu perfil."
+            action={<Link href="/worker/dashboard" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Explorar vagas</Link>} />
         ) : (
           <div className="space-y-4">
             {applications.map((application) => (
-              <article key={application.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-5">
+              <Card as="article" key={application.id} className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-lg font-bold text-gray-900">
                     {application.job?.title ?? 'Vaga indisponível'}
                   </h2>
-                  <span className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">
+                  <Badge tone={application.status === 'approved' ? 'success' : application.status === 'rejected' ? 'danger' : 'warning'}>
                     {statusLabels[application.status] ?? application.status}
-                  </span>
+                  </Badge>
                 </div>
                 {application.job && (
                   <>
@@ -184,7 +187,7 @@ export default function WorkerApplicationsPage() {
                     </Link>
                   </div>
                 )}
-              </article>
+              </Card>
             ))}
           </div>
         )}

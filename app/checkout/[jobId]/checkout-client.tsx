@@ -1,10 +1,12 @@
 'use client';
 
+import { Button, LoadingSkeleton, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { getDeviceCoordinates } from '@/lib/geolocation';
+import JobPresenceLocation from '@/app/components/job-presence-location';
 
 interface CheckoutContext {
   job_id: string;
@@ -132,12 +134,10 @@ export default function CheckoutClient({ jobId }: { jobId: string }) {
         </header>
 
         {loading ? (
-          <p className="rounded-xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-            Carregando dados da vaga...
-          </p>
+          <LoadingSkeleton label="Carregando dados da vaga..." />
         ) : errorMessage && !context ? (
           <div className="space-y-4 rounded-xl border border-red-200 bg-white p-6">
-            <p role="alert" className="text-sm text-red-700">{errorMessage}</p>
+            <Toast tone="error">{errorMessage}</Toast>
             <Link href="/login" className="text-sm font-semibold text-emerald-700 hover:underline">
               Fazer login
             </Link>
@@ -147,6 +147,7 @@ export default function CheckoutClient({ jobId }: { jobId: string }) {
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase text-gray-500">Vaga</p>
               <h2 className="text-xl font-bold text-gray-900">{context.job_title}</h2>
+              <JobPresenceLocation jobId={context.job_id} />
             </div>
 
             <dl className="grid gap-4 border-y border-gray-100 py-5 sm:grid-cols-2">
@@ -177,9 +178,7 @@ export default function CheckoutClient({ jobId }: { jobId: string }) {
             </dl>
 
             {errorMessage && (
-              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {errorMessage}
-              </p>
+              <Toast tone="error">{errorMessage}</Toast>
             )}
 
             {successMessage && completed ? (
@@ -190,14 +189,14 @@ export default function CheckoutClient({ jobId }: { jobId: string }) {
                 </p>
               </div>
             ) : (
-              <button
+              <Button variant="primary"
                 type="button"
                 onClick={performCheckout}
                 disabled={submitting || context.application_status !== 'in_progress'}
-                className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-emerald-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex w-full items-center justify-center px-5 py-3 text-sm"
               >
                 {locating ? 'Obtendo localização...' : submitting ? 'Finalizando...' : 'Finalizar diária'}
-              </button>
+              </Button>
             )}
           </article>
         ) : null}

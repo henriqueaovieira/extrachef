@@ -44,12 +44,59 @@ self.addEventListener('push', (event) => {
     payload = { body: event.data?.text() || '' };
   }
 
-  event.waitUntil(self.registration.showNotification(payload.title || 'ExtraChef', {
-    body: payload.body || 'Você tem uma nova atualização.',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    data: { url: payload.url || '/' },
+  const reportReceived = async () => {
+    if (!payload.notificationId || !payload.subscriptionId || !payload.receiptToken) return;
+    try {
+      await fetch(new URL('/api/push/receipt', self.location.origin), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notificationId: payload.notificationId,
+          subscriptionId: payload.subscriptionId,
+          receiptToken: payload.receiptToken,
+        }),
+      });
+    } catch {
+      // The provider delivery record remains available if the receipt cannot be posted.
+    }
+  };
+
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (windows) => {
+    const visibleWindow = windows.find((client) => client.visibilityState === 'visible');
+    if (visibleWindow) {
+      visibleWindow.postMessage({ type: 'PUSH_RECEIVED', payload });
+      await reportReceived();
+      return;
+    }
+
+    await self.registration.showNotification(payload.title || 'ExtraChef', {
+      body: payload.body || 'Você tem uma nova atualização.',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: payload.notificationId || undefined,
+      data: { url: payload.url || '/' },
+    });
+    await reportReceived();
   }));
+});
+
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil((async () => {
+    const oldSubscription = event.oldSubscription;
+    if (!event.newSubscription && oldSubscription?.options?.applicationServerKey) {
+      try {
+        await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: oldSubscription.options.applicationServerKey,
+        });
+      } catch {
+        // The application synchronizes the current subscription when it next opens.
+      }
+    }
+
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    windows.forEach((client) => client.postMessage({ type: 'PUSH_SUBSCRIPTION_CHANGED' }));
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
