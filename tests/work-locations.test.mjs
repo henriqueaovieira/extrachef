@@ -54,7 +54,8 @@ test('catalog migration has no dependency on events, jobs, attendance or geocodi
   assert.match(ui, /mutationLock/);
   assert.match(ui, /window\.confirm/);
   assert.match(ui, /range\(offset, offset \+ pageSize - 1\)/);
-  assert.match(source('../app/restaurant/dashboard/page.tsx'), /href="\/restaurant\/locations"/);
+  assert.match(source('../app/restaurant/more/page.tsx'), /href: '\/restaurant\/locations'/);
+  assert.match(source('../app/components/mobile-bottom-nav.tsx'), /href: '\/restaurant\/more'/);
   assert.equal(existsSync(new URL('../supabase/migrations/20261015050000_operational_locations.sql', import.meta.url)), false);
   assert.ok(existsSync(new URL('../supabase/proposals/20261015050000_operational_locations.sql', import.meta.url)));
 });

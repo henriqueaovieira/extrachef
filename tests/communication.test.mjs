@@ -498,10 +498,13 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
     assert.doesNotMatch(renderToStaticMarkup(React.createElement(Bell)), /bg-red-600/);
   }
   counts = { messages: 3, notifications: 125 };
-  const markup = renderToStaticMarkup(React.createElement(Nav, { role: 'restaurant' }));
-  assert.match(markup, /aria-label="Chat: 3 não lidas"/);
-  assert.match(markup, /aria-label="Avisos: 125 não lidas"/);
-  assert.match(markup, /99\+/);
+  const workerMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'worker' }));
+  assert.match(workerMarkup, /aria-label="Chat: 3 não lidas"/);
+  assert.match(workerMarkup, /aria-label="Avisos: 125 não lidas"/);
+  assert.match(workerMarkup, /99\+/);
+  const restaurantMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'restaurant' }));
+  assert.match(restaurantMarkup, /aria-label="Mensagens: 3 não lidas"/);
+  assert.doesNotMatch(restaurantMarkup, /Avisos: 125/);
   assert.match(renderToStaticMarkup(React.createElement(Bell)), /Notificações: 125 não lidas/);
 });
 

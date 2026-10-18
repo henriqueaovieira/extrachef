@@ -151,7 +151,7 @@ export default function RestaurantLocations() {
       <section className="mx-auto max-w-4xl space-y-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <Link href="/restaurant/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Voltar ao Dashboard</Link>
+            <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>
             <h1 className="text-2xl font-bold text-gray-950">Meus Locais</h1>
             <p className="mt-2 text-sm text-gray-600">Cadastre endereços uma vez e selecione-os nos eventos. Alterar o catálogo não muda eventos existentes. Vagas ainda não estão integradas.</p>
           </div>

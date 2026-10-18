@@ -332,8 +332,8 @@ export default function RestaurantEvents() {
       <section className="mx-auto max-w-5xl space-y-6">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <Link href="/restaurant/dashboard" className="text-sm font-semibold text-orange-700">← Dashboard</Link>
-            <h1 className="mt-2 text-2xl font-bold text-gray-950 sm:text-3xl">Eventos</h1>
+            <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>
+            <h1 className="text-2xl font-bold text-gray-950 sm:text-3xl">Eventos</h1>
             <p className="mt-1 text-sm text-gray-600">Organize os eventos do restaurante em um só lugar.</p>
           </div>
           <Button variant="primary"

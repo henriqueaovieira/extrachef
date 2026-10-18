@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import CommunicationNavigation from '@/app/components/communication-navigation';
+import { demandWindow } from '@/lib/demands';
+import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
 
 interface Application {
   id: string;
@@ -29,12 +31,21 @@ export default function WorkerApplicationsPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [signedIn, setSignedIn] = useState(true);
-  const supabase = createClient();
+  const [supabase] = useState(() => createClient());
+  const [operations, setOperations] = useState<OperationalAssignment[]>([]);
+  const [reviews, setReviews] = useState<PendingReview[]>([]);
+  const [operationsError, setOperationsError] = useState('');
+  const [clock, setClock] = useState(() => new Date());
 
   useEffect(() => {
+    let active = true;
+    let refreshing = false;
     async function loadApplications() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-
+      if (!active) return;
       if (authError || !user) {
         setSignedIn(false);
         setLoading(false);
@@ -65,11 +76,16 @@ export default function WorkerApplicationsPage() {
       } else {
         setApplications((data ?? []) as unknown as Application[]);
       }
-
-      setLoading(false);
+      const [assignments, pending] = await Promise.all([loadOperationalAssignments(supabase), loadPendingReviews(supabase)]);
+      if (active) { setOperations(assignments); setReviews(pending); setOperationsError(''); }
+      } catch (error) {
+        if (active) setOperationsError(error instanceof Error ? error.message : 'Não foi possível carregar as etapas operacionais.');
+      } finally { refreshing = false; if (active) setLoading(false); }
     }
 
-    loadApplications();
+    void loadApplications();
+    const timer = window.setInterval(() => { setClock(new Date()); void loadApplications(); }, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [supabase]);
 
   const statusLabels: Record<string, string> = {
@@ -97,9 +113,12 @@ export default function WorkerApplicationsPage() {
 
       <section id="chats" className="mx-auto max-w-6xl space-y-5 px-4 py-5 sm:p-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Minhas Candidaturas</h1>
-          <p className="mt-1 text-sm text-gray-500">Acompanhe suas inscrições para os plantões.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Minhas operações e candidaturas</h1>
+          <p className="mt-1 text-sm text-gray-500">Confira sua confirmação e o próximo passo de cada trabalho.</p>
+          <Link href="/worker/invitations" className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Ver meus convites →</Link>
         </div>
+        {operationsError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">{operationsError}</p>}
+        {reviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar experiência · {review.title}</Link>)}
 
         {loading ? (
           <LoadingSkeleton label="Carregando candidaturas..." />
@@ -120,19 +139,26 @@ export default function WorkerApplicationsPage() {
             action={<Link href="/worker/dashboard" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Explorar vagas</Link>} />
         ) : (
           <div className="space-y-4">
-            {applications.map((application) => (
+            {applications.map((application) => {
+              const operation = operations.find((item) => item.job_id === application.job_id);
+              const window = application.job ? demandWindow(application.job) : null;
+              const next = operation && window ? operationNextAction(operation, window.start, window.end, 'worker', clock) : null;
+              const label = operation?.interruption ? operation.interruption === 'absent' ? 'Ausência confirmada' : operation.interruption === 'abandoned' ? 'Abandono registrado' : 'Cancelada'
+                : application.status === 'in_progress' && window && clock >= window.end ? 'Trabalho encerrado'
+                : application.status === 'approved' && window && clock < window.start ? 'Você está confirmado para esta demanda.'
+                : application.status === 'approved' ? 'Aguardando Check-in' : statusLabels[application.status] ?? application.status;
+              return (
               <Card as="article" key={application.id} className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-lg font-bold text-gray-900">
                     {application.job?.title ?? 'Vaga indisponível'}
                   </h2>
                   <Badge tone={application.status === 'approved' ? 'success' : application.status === 'rejected' ? 'danger' : 'warning'}>
-                    {statusLabels[application.status] ?? application.status}
+                    {label}
                   </Badge>
                 </div>
                 {application.job && (
                   <>
-                    <p className="text-sm text-gray-600">{application.job.description}</p>
                     <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500">
                       <span>{application.job.restaurant?.name ?? 'Estabelecimento'}</span>
                       <span>{application.job.job_date}</span>
@@ -143,52 +169,14 @@ export default function WorkerApplicationsPage() {
                     </div>
                   </>
                 )}
-                {application.status === 'approved' && (
-                  <div className="flex flex-wrap gap-3">
-                    <Link
-                      href={`/chat/${application.job_id}`}
-                      className="inline-flex min-h-12 items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800"
-                    >
-                      Abrir chat
-                    </Link>
-                    <Link
-                      href={`/checkin/${application.job_id}`}
-                      className="inline-flex min-h-12 items-center rounded-lg border border-emerald-700 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50"
-                    >
-                      Realizar check-in
-                    </Link>
-                  </div>
-                )}
-                {application.status === 'in_progress' && (
-                  <div className="flex flex-wrap gap-3">
-                    <Link href={`/chat/${application.job_id}`} className="inline-flex min-h-12 items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Abrir chat</Link>
-                    <Link
-                      href={`/checkout/${application.job_id}`}
-                      className="inline-flex min-h-12 items-center rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-800"
-                    >
-                      Finalizar diária
-                    </Link>
-                  </div>
-                )}
-                {application.status === 'completed' && (
-                  <div className="flex flex-wrap gap-3">
-                    <Link href={`/chat/${application.job_id}`} className="inline-flex min-h-12 items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white">Abrir chat</Link>
-                    <Link
-                      href={`/checkout/${application.job_id}`}
-                      className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
-                    >
-                      Ver finalização
-                    </Link>
-                    <Link
-                      href={`/reviews/${application.job_id}`}
-                      className="inline-flex min-h-12 items-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-600"
-                    >
-                      Avaliar restaurante
-                    </Link>
-                  </div>
-                )}
+                {next && <Link href={next.href} className="ec-button ec-button--primary px-4">{next.label}</Link>}
+                <details className="border-t border-gray-100 pt-2">
+                  <summary className="cursor-pointer py-2 text-sm text-gray-600">Orientações e contato</summary>
+                  <p className="py-3 text-sm text-gray-600">{application.job?.description}</p>
+                  {['approved', 'in_progress', 'completed'].includes(application.status) && <Link href={`/chat/${application.job_id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Conversar</Link>}
+                </details>
               </Card>
-            ))}
+            ); })}
           </div>
         )}
       </section>

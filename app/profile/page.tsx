@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import LogoutButton from '@/app/components/logout-button';
+import OperationalReputationView from '@/app/components/operational-reputation';
 
 interface UserProfile {
   name: string;
@@ -85,12 +86,9 @@ export default function ProfilePage() {
                 <dt className="text-xs font-medium text-gray-500">Cidade</dt>
                 <dd className="mt-1 break-words text-sm font-medium text-gray-900">{profile.city || 'Não informada'}</dd>
               </div>
-              <div>
-                <dt className="text-xs font-medium text-gray-500">Score</dt>
-                <dd className="mt-1 text-sm font-medium text-gray-900">{Number(profile.score ?? 0).toFixed(2)}</dd>
-              </div>
             </dl>
 
+            {profile.role === 'worker' && <OperationalReputationView />}
             <LogoutButton />
           </article>
         ) : null}

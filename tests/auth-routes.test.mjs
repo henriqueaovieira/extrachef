@@ -6,7 +6,7 @@ import {
 
 test('all requested protected namespaces include their root and descendants', () => {
   for (const root of [
-    '/restaurant', '/worker', '/chat', '/checkin', '/checkout',
+    '/restaurant', '/worker', '/chat', '/checkin', '/checkout', '/payment',
     '/reviews', '/notifications', '/settings', '/profile',
   ]) {
     assert.equal(isProtectedPath(root), true, root);
@@ -34,7 +34,7 @@ test('roles have explicit dashboards and cannot access the opposite namespace', 
 test('safe redirects preserve deep links, queries and fragments', () => {
   for (const path of [
     '/restaurant/dashboard', '/restaurant/events',
-    '/notifications', '/profile', '/chat/123', '/chat/123?from=push#latest',
+    '/notifications', '/profile', '/chat/123', '/chat/123?from=push#latest', '/payment/123',
   ]) {
     assert.equal(sanitizeRedirect(path, 'restaurant'), path);
   }

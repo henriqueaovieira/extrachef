@@ -9,7 +9,7 @@ export default function CommunicationNavigation({ role }: { role: 'restaurant' |
   const count = counts.messages;
   return (
     <nav aria-label="Comunicação" className="hidden items-center gap-2 md:flex">
-      <Link href={role === 'restaurant' ? '/restaurant/candidates#chats' : '/worker/applications#chats'}
+      <Link href={role === 'restaurant' ? '/restaurant/messages' : '/worker/applications#chats'}
         aria-label={count !== null && count > 0 ? `Chat: ${count} não lidas` : 'Chat'}
         title={chatError || undefined}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-800">

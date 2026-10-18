@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import { loadPendingReviews, type PendingReview } from '@/lib/operations';
 
 interface AvailableEvent {
   id: string;
@@ -21,11 +22,15 @@ export default function CreateJobPage() {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [value, setValue] = useState('');
+  const [quantity, setQuantity] = useState('1');
   const [events, setEvents] = useState<AvailableEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventId, setEventId] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [publishedId, setPublishedId] = useState<string | null>(null);
+  const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
+  const [reviewsReady, setReviewsReady] = useState(false);
 
   const router = useRouter();
   const [supabase] = useState(() => createClient());
@@ -35,12 +40,16 @@ export default function CreateJobPage() {
     async function loadEvents() {
       const { data: auth, error: authError } = await supabase.auth.getUser();
       if (!active) return;
-      if (authError || !auth.user) { setErrorMessage('Faça login para criar uma vaga.'); return; }
+      if (authError || !auth.user) { setErrorMessage('Faça login para criar uma demanda.'); return; }
+      const reviews = await loadPendingReviews(supabase);
+      if (!active) return;
+      setPendingReviews(reviews);
+      setReviewsReady(true);
       const { data, error } = await supabase.from('events')
         .select('id, title, event_date, revision')
         .eq('restaurant_id', auth.user.id).order('event_date', { ascending: false });
       if (!active) return;
-      if (error) setErrorMessage('Não foi possível carregar os eventos. Para vincular uma vaga a um evento, recarregue a página.');
+      if (error) setErrorMessage('Não foi possível carregar os eventos. Para vincular uma demanda a um evento, recarregue a página.');
       else {
         setEvents(data ?? []);
         const requested = new URLSearchParams(window.location.search).get('event');
@@ -51,8 +60,8 @@ export default function CreateJobPage() {
         }
       }
     }
-    void loadEvents().catch(() => {
-      if (active) setErrorMessage('Não foi possível carregar os eventos. Recarregue a página.');
+    void loadEvents().catch((error) => {
+      if (active) setErrorMessage(error instanceof Error ? error.message : 'Não foi possível carregar os dados para publicação. Recarregue a página.');
     }).finally(() => {
       if (active) setEventsLoading(false);
     });
@@ -61,7 +70,7 @@ export default function CreateJobPage() {
 
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading || eventsLoading) return;
+    if (loading || eventsLoading || !reviewsReady || pendingReviews.length || publishedId) return;
     setLoading(true);
     setErrorMessage('');
 
@@ -78,16 +87,21 @@ export default function CreateJobPage() {
       if (value.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
         throw new Error('Informe um valor de diária maior que zero.');
       }
+      const required = Number(quantity);
+      if (!Number.isInteger(required) || required < 1 || required > 50) {
+        throw new Error('Informe de 1 a 50 profissionais.');
+      }
 
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData.user) throw new Error('Sessão expirada. Faça login novamente.');
-      const { error } = await supabase.rpc('create_restaurant_job', {
+      const { data: demandId, error } = await supabase.rpc('create_restaurant_demand', {
         p_title: title,
         p_description: description,
         p_job_date: jobDate,
         p_start_time: startTime,
         p_end_time: endTime,
         p_value: amount,
+        p_quantity: required,
         p_location_source: selectedEvent ? 'event' : 'none',
         p_work_location_id: null,
         p_location_revision: null,
@@ -101,10 +115,10 @@ export default function CreateJobPage() {
             : error.message,
         );
       }
-      router.push('/restaurant/dashboard?feedback=job_created');
-      router.refresh();
+      if (typeof demandId !== 'string') throw new Error('O serviço não confirmou a demanda criada.');
+      setPublishedId(demandId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível publicar a vaga.');
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível publicar a demanda.');
     } finally { setLoading(false); }
   };
 
@@ -113,11 +127,11 @@ export default function CreateJobPage() {
       <Card className="mx-auto max-w-xl space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Criar Nova Vaga</h1>
-            <p className="text-sm text-gray-500 mt-1">Preencha os dados do plantão temporário.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Nova Demanda</h1>
+            <p className="text-sm text-gray-500 mt-1">Uma necessidade operacional. De 1 a 50 profissionais.</p>
           </div>
           <Link
-            href="/restaurant/dashboard"
+            href="/restaurant/demands"
             className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600 hover:text-orange-600"
           >
             ← Voltar
@@ -128,10 +142,18 @@ export default function CreateJobPage() {
           <Toast tone="error">{errorMessage}</Toast>
         )}
 
-        <form onSubmit={handleCreateJob} className="space-y-4">
-          <fieldset disabled={loading || eventsLoading} className="min-w-0 space-y-4">
+        {publishedId ? <section className="space-y-5">
+          <Toast tone="success">Demanda publicada com sucesso. Os convites são opcionais e não alteram a publicação.</Toast>
+          <h2 className="text-xl font-semibold">Convidar profissionais da sua Rede de Talentos</h2>
+          <Link href={`/restaurant/demands/${publishedId}?view=talents`} className="ec-button ec-button--primary w-full px-4">Convidar Agora</Link>
+          <Button onClick={() => { router.push(`/restaurant/demands/${publishedId}`); router.refresh(); }} className="w-full px-4">Pular</Button>
+        </section> : pendingReviews.length ? <section className="space-y-3">
+          <Toast tone="info">Antes de criar uma nova demanda, avalie sua última experiência.</Toast>
+          {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
+        </section> : <form onSubmit={handleCreateJob} className="space-y-4">
+          <fieldset disabled={loading || eventsLoading || !reviewsReady} className="min-w-0 space-y-4">
           <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-1" className="block text-sm font-medium text-gray-700 mb-1">Cargo</label>
+            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-1" className="block text-sm font-medium text-gray-700 mb-1">Nome da demanda</label>
             <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-1"
               type="text"
               required
@@ -140,6 +162,11 @@ export default function CreateJobPage() {
               placeholder="Ex: Cozinheiro(a), Garçom, Auxiliar"
               className="w-full"
             />
+          </div>
+
+          <div>
+            <label htmlFor="demand-quantity" className="mb-1 block text-sm font-medium text-gray-700">Profissionais necessários</label>
+            <TextInput id="demand-quantity" type="number" min={1} max={50} step={1} required value={quantity} onChange={(event) => setQuantity(event.target.value)} />
           </div>
 
           <div>
@@ -174,13 +201,13 @@ export default function CreateJobPage() {
                 setJobDate(selected.event_date);
               }
             }}>
-              <option value="">{eventsLoading ? 'Carregando eventos...' : 'Vaga independente'}</option>
+              <option value="">{eventsLoading ? 'Carregando eventos...' : 'Demanda independente'}</option>
               {events.map((event) => <option key={event.id} value={event.id}>{event.title} · {event.event_date}</option>)}
             </Select>
             <p className="mt-1 text-sm text-gray-600">
               {eventId
-                ? 'A vaga receberá uma cópia do local do evento, mesmo sem coordenadas. Alterações posteriores no evento não modificarão esta vaga.'
-                : 'A vaga será criada sem local definido.'}
+                ? 'A demanda receberá uma cópia do local do evento, mesmo sem coordenadas. Alterações posteriores no evento não modificarão esta demanda.'
+                : 'A demanda será criada sem local definido.'}
             </p>
           </div>
 
@@ -209,7 +236,7 @@ export default function CreateJobPage() {
           </div>
 
           <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-6" className="block text-sm font-medium text-gray-700 mb-1">Valor da Diária (R$)</label>
+            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-6" className="block text-sm font-medium text-gray-700 mb-1">Diária por profissional (R$)</label>
             <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-6"
               type="number"
               inputMode="decimal"
@@ -224,7 +251,7 @@ export default function CreateJobPage() {
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t">
             <Link
-              href="/restaurant/dashboard"
+              href="/restaurant/demands"
               className="inline-flex min-h-12 items-center justify-center rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
             >
               Cancelar
@@ -235,11 +262,11 @@ export default function CreateJobPage() {
               busy={loading}
               className="inline-flex items-center justify-center px-6 py-2.5 text-sm shadow-sm"
             >
-              {loading ? 'Publicando...' : 'Publicar Vaga'}
+              {loading ? 'Publicando...' : 'Publicar Demanda'}
             </Button>
           </div>
           </fieldset>
-        </form>
+        </form>}
       </Card>
       <MobileBottomNav role="restaurant" />
     </main>

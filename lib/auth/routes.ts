@@ -1,7 +1,7 @@
 export type AccountRole = 'restaurant' | 'worker';
 
 const protectedPrefixes = [
-  '/restaurant', '/worker', '/chat', '/checkin', '/checkout',
+  '/restaurant', '/worker', '/chat', '/checkin', '/checkout', '/payment',
   '/reviews', '/notifications', '/settings', '/profile',
 ];
 
@@ -51,6 +51,12 @@ export const authMessages: Record<string, string> = {
   session_expired: 'Sua sessão expirou. Faça login novamente.',
   role_forbidden: 'Esta área não está disponível para seu perfil.',
   profile_unavailable: 'Não foi possível carregar seu perfil. Faça login para tentar novamente.',
-  confirmation_failed: 'Não foi possível confirmar seu e-mail. Solicite um novo link ou faça login.',
+  confirmation_failed: 'Não foi possível concluir a confirmação do cadastro. Abra o link novamente ou faça login.',
+  confirmation_expired: 'O link de confirmação de cadastro expirou. Cadastre-se novamente com o mesmo e-mail para receber um novo link.',
+  confirmation_invalid: 'Este link de confirmação de cadastro é inválido ou já foi usado. Se sua conta já foi confirmada, basta entrar.',
+  recovery_failed: 'Não foi possível validar o link de recuperação de senha. Tente novamente ou solicite um novo link.',
+  recovery_expired: 'O link de recuperação de senha expirou. Solicite um novo link para redefinir sua senha.',
+  recovery_invalid: 'Este link de recuperação de senha é inválido ou já foi usado. Solicite um novo link e abra-o neste navegador.',
   signed_out: 'Você saiu da sua conta.',
+  password_updated: 'Senha redefinida. Entre com sua nova senha.',
 };

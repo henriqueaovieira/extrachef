@@ -10,6 +10,7 @@ import PushNotificationControl from '@/app/components/push-notification-control'
 import LogoutButton from '@/app/components/logout-button';
 import ProfileProgress from '@/app/components/profile-progress';
 import { getProfileProgress } from '@/lib/ui/profile-progress';
+import OperationalReputationView from '@/app/components/operational-reputation';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -158,10 +159,11 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
       <section className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-center justify-between gap-3">
           <div>
+            {role === 'restaurant' && <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>}
             <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
             <h1 className="mt-1 text-2xl font-bold text-gray-950">Perfil</h1>
           </div>
-          <Link href={dashboardHref} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Início</Link>
+          {role === 'worker' && <Link href={dashboardHref} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Início</Link>}
         </header>
 
         {!loading && !errorMessage && progress && <ProfileProgress progress={progress} />}
@@ -188,7 +190,6 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
               <div className="min-w-0 flex-1">
                 <h2 className="break-words text-xl font-bold text-gray-950">{profile.name}</h2>
                 <p className="text-sm text-gray-600">{profile.role === 'worker' ? 'Profissional' : 'Restaurante'} · {profile.city || 'Cidade não informada'}</p>
-                {profile.role === 'worker' && <p className="mt-1 text-sm font-semibold text-amber-700">Score {Number(profile.score ?? 0).toFixed(2)}</p>}
               </div>
               <Link href={editHref} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">Editar perfil</Link>
             </div>
@@ -215,6 +216,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
         )}
         {profile && (
           <>
+            {role === 'worker' && <OperationalReputationView />}
             <PushNotificationControl />
             <Link href="/settings/privacy" className="flex min-h-12 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">
               Preferências de notificações e privacidade

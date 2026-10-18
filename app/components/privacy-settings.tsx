@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Button, LoadingSkeleton, TextInput, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -103,6 +104,7 @@ export default function PrivacySettings() {
     <main className="min-h-dvh bg-gray-50 px-4 py-6 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-10 md:pb-10">
       <section className="mx-auto max-w-2xl space-y-5">
         <header>
+          {role === 'restaurant' && <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>}
           <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
           <h1 className="mt-1 text-2xl font-bold text-gray-950">Privacidade e notificações</h1>
           <p className="mt-2 text-sm leading-6 text-gray-600">Escolha quais avisos deseja receber. A permissão do navegador para Push é configurada separadamente no Perfil.</p>

@@ -8,6 +8,9 @@ import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import CommunicationNavigation from '@/app/components/communication-navigation';
 import { getDeviceCoordinates, type DeviceCoordinates } from '@/lib/geolocation';
 import { distanceMeters, estimatedDistance } from '@/lib/work-location';
+import { loadPendingReviews, type PendingReview } from '@/lib/operations';
+import OperationalReputationView from '@/app/components/operational-reputation';
+import { demandWindow } from '@/lib/demands';
 
 interface Job {
   id: string;
@@ -53,9 +56,9 @@ interface WorkerStats {
 export default function WorkerDashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
-  const [profile, setProfile] = useState<{ name: string; city: string; score: number } | null>(null);
+  const [profile, setProfile] = useState<{ name: string; city: string | null; score: number | null } | null>(null);
   const [stats, setStats] = useState<WorkerStats | null>(null);
-  const [estimatedEarnings, setEstimatedEarnings] = useState(0);
+  const [estimatedEarnings, setEstimatedEarnings] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [signedIn, setSignedIn] = useState(true);
   const [applyingId, setApplyingId] = useState<string | null>(null);
@@ -65,48 +68,84 @@ export default function WorkerDashboardPage() {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [jobsError, setJobsError] = useState('');
+  const [applicationsError, setApplicationsError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [statsError, setStatsError] = useState('');
+  const [earningsError, setEarningsError] = useState('');
+  const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
+  const [reviewsError, setReviewsError] = useState('');
+  const [reviewsReady, setReviewsReady] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadDashboardData() {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError || !authData.user) {
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError || !authData.user) {
+          if (isMounted) {
+            setSignedIn(false);
+            setLoading(false);
+          }
+          return;
+        }
+        const userId = authData.user.id;
+        try {
+          const pending = await loadPendingReviews(supabase);
+          if (!isMounted) return;
+          setPendingReviews(pending);
+          setReviewsReady(true);
+        } catch (error) {
+          if (isMounted) setReviewsError(error instanceof Error ? error.message : 'Não foi possível conferir as avaliações pendentes.');
+        }
+
+        const [profileResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
+          supabase.from('public_user_directory').select('name, city, score').eq('id', userId).single(),
+          supabase.from('applications').select('job_id').eq('worker_id', userId),
+          supabase
+            .from('jobs')
+            .select('id, title, description, job_date, start_time, end_time, value, status, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
+            .eq('status', 'open')
+            .order('job_date', { ascending: true }),
+          supabase.rpc('get_worker_dashboard_stats'),
+          supabase.rpc('get_worker_estimated_earnings'),
+        ]);
+
+        if (!isMounted) return;
+
+        if (profileResult.error) setProfileError(`Não foi possível carregar seus dados profissionais: ${profileResult.error.message}`);
+        else if (profileResult.data) setProfile(profileResult.data);
+        else setProfileError('Não foi possível carregar seus dados profissionais.');
+        if (applicationsResult.error) {
+          setApplicationsError(`Não foi possível verificar suas candidaturas: ${applicationsResult.error.message}`);
+        } else if (applicationsResult.data) {
+          setAppliedJobIds(applicationsResult.data.map((application) => application.job_id));
+        }
+        if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
+        if (jobsResult.error) setJobsError(`Não foi possível carregar as vagas: ${jobsResult.error.message}`);
+        if (statsResult.error) {
+          setStatsError(`Não foi possível carregar seu resumo: ${statsResult.error.message}`);
+        } else {
+          const result = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as WorkerStats | null;
+          if (result) setStats(result);
+          else setStatsError('O resumo profissional não retornou dados.');
+        }
+        if (earningsResult.error) {
+          setEarningsError(`Não foi possível carregar os ganhos estimados: ${earningsResult.error.message}`);
+        } else if (earningsResult.data !== null) {
+          setEstimatedEarnings(Number(earningsResult.data));
+        } else {
+          setEarningsError('Os ganhos estimados não retornaram dados.');
+        }
+
+        setLoading(false);
+      } catch (error) {
         if (isMounted) {
-          setSignedIn(false);
+          setPageError(error instanceof Error ? error.message : 'Não foi possível carregar o painel.');
           setLoading(false);
         }
-        return;
       }
-      const userId = authData.user.id;
-
-      const [profileResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
-        supabase.from('public_user_directory').select('name, city, score').eq('id', userId).single(),
-        supabase.from('applications').select('job_id').eq('worker_id', userId),
-        supabase
-          .from('jobs')
-          .select('id, title, description, job_date, start_time, end_time, value, status, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
-          .eq('status', 'open')
-          .order('job_date', { ascending: true }),
-        supabase.rpc('get_worker_dashboard_stats'),
-        supabase.rpc('get_worker_estimated_earnings'),
-      ]);
-
-      if (!isMounted) return;
-
-      if (profileResult.data) setProfile(profileResult.data);
-      if (applicationsResult.data) {
-        setAppliedJobIds(applicationsResult.data.map((application) => application.job_id));
-      }
-      if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
-      if (jobsResult.error) setJobsError(`Não foi possível carregar as vagas: ${jobsResult.error.message}`);
-      if (!statsResult.error) {
-        const result = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as WorkerStats | null;
-        if (result) setStats(result);
-      }
-      if (!earningsResult.error) setEstimatedEarnings(Number(earningsResult.data ?? 0));
-
-      setLoading(false);
     }
 
     void loadDashboardData();
@@ -116,6 +155,11 @@ export default function WorkerDashboardPage() {
   }, [supabase]);
 
   const handleApply = async (jobId: string) => {
+    if (applyingId) return;
+    if (!reviewsReady || pendingReviews.length) {
+      setFeedbackMessage(pendingReviews.length ? 'Antes de se candidatar novamente, avalie sua última experiência.' : 'Não foi possível conferir suas avaliações pendentes. Atualize a página.');
+      return;
+    }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setFeedbackMessage('Sua sessão expirou. Entre novamente.');
@@ -187,11 +231,16 @@ export default function WorkerDashboardPage() {
   }
 
   const metricCards = [
-    { label: 'Candidaturas', value: stats?.total_applications ?? 0, detail: 'Enviadas até agora', accent: 'border-l-orange-500' },
-    { label: 'Diárias concluídas', value: stats?.completed_jobs ?? 0, detail: 'Serviços finalizados', accent: 'border-l-blue-600' },
-    { label: 'Avaliação média', value: Number(stats?.average_rating ?? 0).toFixed(2), detail: 'Notas recebidas', accent: 'border-l-amber-500' },
-    { label: 'Score atual', value: Number(stats?.current_score ?? profile?.score ?? 0).toFixed(2), detail: 'Perfil profissional', accent: 'border-l-emerald-600' },
-    { label: 'Ganhos estimados', value: `R$ ${estimatedEarnings.toFixed(2)}`, detail: 'Diárias concluídas; não confirma pagamento', accent: 'border-l-teal-600' },
+    ...(stats ? [
+      { label: 'Candidaturas', value: stats.total_applications, detail: 'Enviadas até agora', accent: 'border-l-orange-500' },
+      { label: 'Diárias concluídas', value: stats.completed_jobs, detail: 'Serviços finalizados', accent: 'border-l-blue-600' },
+      ...(stats.average_rating > 0 ? [
+        { label: 'Avaliação média', value: stats.average_rating.toFixed(2), detail: 'Notas recebidas', accent: 'border-l-amber-500' },
+      ] : []),
+    ] : []),
+    ...(estimatedEarnings !== null
+      ? [{ label: 'Ganhos estimados', value: `R$ ${estimatedEarnings.toFixed(2)}`, detail: 'Diárias concluídas; não confirma pagamento', accent: 'border-l-teal-600' }]
+      : []),
   ];
 
   return (
@@ -215,18 +264,26 @@ export default function WorkerDashboardPage() {
             <h1 className="text-2xl font-bold text-gray-900">Olá, {profile?.name || 'Profissional'}</h1>
             <p className="text-sm text-gray-500">Explore e candidate-se aos plantões temporários disponíveis.</p>
           </div>
-          <div className="flex gap-4 bg-gray-50 p-3 rounded-xl border">
-            <div>
-              <span className="block text-[10px] text-gray-400 font-bold uppercase">Score</span>
-              <span className="text-base font-bold text-orange-600">⭐ {Number(profile?.score || 5).toFixed(2)}</span>
-            </div>
-            <div className="w-px bg-gray-200" />
+          <div className="bg-gray-50 p-3 rounded-xl border">
             <div>
               <span className="block text-[10px] text-gray-400 font-bold uppercase">Cidade</span>
               <span className="text-base font-bold text-gray-800">📍 {profile?.city || 'Não informada'}</span>
             </div>
           </div>
         </div>
+
+        {pageError && <Toast tone="error">{pageError}</Toast>}
+        {profileError && <Toast tone="error">{profileError}</Toast>}
+        {applicationsError && <Toast tone="error">{applicationsError}</Toast>}
+        {statsError && <Toast tone="error">{statsError}</Toast>}
+        {earningsError && <Toast tone="error">{earningsError}</Toast>}
+        {reviewsError && <Toast tone="error">{reviewsError}</Toast>}
+        {pendingReviews.length > 0 && <section className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+          <h2 className="text-lg font-semibold">Avaliação pendente</h2>
+          <p className="text-sm text-gray-600">Antes de se candidatar novamente, avalie sua última experiência.</p>
+          {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
+        </section>}
+        <Link href="/worker/applications" className="ec-button ec-button--primary w-full px-4">Acompanhar minhas operações</Link>
 
         <section aria-label="Resumo profissional" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {metricCards.map((card) => (
@@ -237,13 +294,17 @@ export default function WorkerDashboardPage() {
             </article>
           ))}
         </section>
+        <details>
+          <summary className="cursor-pointer py-3 text-sm font-semibold">Minha confiança operacional</summary>
+          <OperationalReputationView />
+        </details>
 
         <section id="historico" className="space-y-4">
           <div>
             <h2 className="text-xl font-bold text-gray-950">Histórico de trabalhos</h2>
             <p className="mt-1 text-sm text-gray-600">Suas diárias em andamento e concluídas.</p>
           </div>
-          {!stats?.history?.length ? (
+          {statsError ? null : !stats?.history?.length ? (
             <p className="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">Seu histórico aparecerá após iniciar uma diária.</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
@@ -263,7 +324,7 @@ export default function WorkerDashboardPage() {
                       <td className="px-4 py-3 font-medium text-gray-900">{item.title}</td>
                       <td className="px-4 py-3 text-gray-600">{item.restaurant_name || 'Estabelecimento'}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Date(`${item.job_date}T00:00:00`).toLocaleDateString('pt-BR')}</td>
-                      <td className="px-4 py-3 text-gray-600">{item.status === 'completed' ? 'Concluída' : 'Em andamento'}</td>
+                      <td className="px-4 py-3 text-gray-600">{item.status === 'completed' ? 'Concluída' : new Date() >= demandWindow(item).end ? 'Trabalho encerrado' : 'Trabalho em andamento'}</td>
                       <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-800">R$ {Number(item.value).toFixed(2)}</td>
                     </tr>
                   ))}
@@ -339,7 +400,7 @@ export default function WorkerDashboardPage() {
                         <Button variant="primary"
                           type="button"
                           onClick={() => handleApply(job.id)}
-                          disabled={isProcessing}
+                          disabled={isProcessing || applyingId !== null || !reviewsReady || pendingReviews.length > 0}
                           className="w-full px-6 py-2.5 text-sm shadow-sm"
                         >
                           {isProcessing ? 'Enviando...' : 'Candidatar-se'}

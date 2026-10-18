@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, LoadingSkeleton, TextArea, Toast } from '@/app/components/ui';
+import { Button, LoadingSkeleton, TextArea, TextInput, Toast } from '@/app/components/ui';
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -22,6 +22,7 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
   const [reviewerId, setReviewerId] = useState('');
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
+  const [wouldWorkAgain, setWouldWorkAgain] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -74,7 +75,11 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
 
   const submitReview = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!context || !reviewerId || rating < 1 || rating > 5 || sending || context.existing_rating) return;
+    if (!context || !reviewerId || sending || context.existing_rating) return;
+    if (rating < 1 || rating > 5 || wouldWorkAgain === null) {
+      setErrorMessage('Escolha a nota e informe se trabalharia novamente.');
+      return;
+    }
 
     setSending(true);
     setErrorMessage('');
@@ -89,6 +94,7 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
         reviewed_id: context.reviewed_id,
         rating,
         comment: comment.trim(),
+        would_work_again: wouldWorkAgain,
       })
       .select('rating, comment')
       .single();
@@ -113,6 +119,8 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
 
   const hasReviewed = context?.existing_rating !== null && context?.existing_rating !== undefined;
   const currentRole = reviewerId && context?.restaurant_id === reviewerId ? 'restaurant' : 'worker';
+  const returnHref = currentRole === 'restaurant' ? '/restaurant/dashboard' : '/worker/applications';
+  const returnLabel = currentRole === 'restaurant' ? 'Voltar ao painel' : 'Minhas diárias';
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28 sm:px-6 sm:py-10 md:pb-10">
@@ -122,8 +130,8 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
             <p className="text-sm font-semibold text-emerald-700">ExtraChef</p>
             <h1 className="mt-1 text-2xl font-bold text-gray-900">Avaliação da diária</h1>
           </div>
-          <Link href="/worker/applications" className="text-sm font-medium text-gray-600 hover:text-emerald-700">
-            Minhas diárias
+          <Link href={returnHref} className="text-sm font-medium text-gray-600 hover:text-emerald-700">
+            {returnLabel}
           </Link>
         </header>
 
@@ -141,7 +149,7 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
             <div>
               <p className="text-xs font-semibold uppercase text-gray-500">{context.job_title}</p>
               <h2 className="mt-2 text-xl font-bold text-gray-900">{context.reviewed_name}</h2>
-              <p className="mt-1 text-sm text-gray-500">Como foi trabalhar com esta pessoa?</p>
+              <p className="mt-1 text-sm text-gray-500">Como foi sua experiência com {currentRole === 'restaurant' ? 'este profissional' : 'esta empresa'}?</p>
             </div>
 
             {successMessage && (
@@ -192,7 +200,17 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
                   </div>
                 </fieldset>
 
-                <div>
+                <fieldset className="space-y-3">
+                  <legend className="text-sm font-medium">{currentRole === 'restaurant' ? 'Você contrataria novamente?' : 'Você trabalharia novamente?'}</legend>
+                  <div className="flex gap-6">
+                    {[true, false].map((answer) => <label key={String(answer)} className="flex min-h-11 items-center gap-2 text-sm">
+                      <TextInput type="radio" name="would-work-again" required checked={wouldWorkAgain === answer} onChange={() => setWouldWorkAgain(answer)} />
+                      {answer ? 'Sim' : 'Não'}
+                    </label>)}
+                  </div>
+                </fieldset>
+                <details>
+                  <summary className="cursor-pointer py-2 text-sm text-gray-600">Adicionar comentário (opcional)</summary>
                   <label htmlFor="review-comment" className="mb-2 block text-sm font-medium text-gray-700">
                     Comentário <span className="font-normal text-gray-400">(opcional)</span>
                   </label>
@@ -206,11 +224,11 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
                     className="w-full resize-y"
                   />
                   <p className="mt-1 text-right text-xs text-gray-400">{comment.length}/2000</p>
-                </div>
+                </details>
 
                 <Button variant="primary"
                   type="submit"
-                  disabled={sending || rating === 0}
+                  disabled={sending || rating === 0 || wouldWorkAgain === null}
                   className="inline-flex w-full items-center justify-center px-5 py-3 text-base"
                 >
                   {sending ? 'Enviando...' : 'Enviar Avaliação'}

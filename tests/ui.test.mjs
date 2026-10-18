@@ -134,3 +134,19 @@ test('all application input, textarea, select and button elements use shared pri
     assert.doesNotMatch(source, /<(?:input|textarea|select|button)\b/, file.pathname);
   }
 });
+
+test('worker home and profile screens do not invent scores or replace failed reads with zero', () => {
+  const dashboard = readFileSync(new URL('../app/worker/dashboard/page.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(dashboard, /profile\?\.score\s*\|\|\s*5/);
+  assert.doesNotMatch(dashboard, /average_rating\s*\?\?\s*0|current_score\s*\?\?.*0/);
+  assert.match(dashboard, /stats\.average_rating > 0/);
+  assert.match(dashboard, /statsError && <Toast/);
+  assert.match(dashboard, /earningsError && <Toast/);
+
+  for (const path of ['../app/components/profile-overview.tsx', '../app/profile/page.tsx']) {
+    const profile = readFileSync(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(profile, /Number\(profile\.score \?\? 0\)/);
+    assert.doesNotMatch(profile, /profile\.score\.toFixed/);
+    assert.match(profile, /OperationalReputationView/);
+  }
+});

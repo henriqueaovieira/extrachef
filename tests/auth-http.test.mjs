@@ -6,7 +6,7 @@ const origin = process.env.EXTRACHEF_TEST_URL;
 test('unauthenticated protected pages redirect without cache or loss of deep link', { skip: !origin }, async (t) => {
   for (const path of [
     '/restaurant/events', '/worker/dashboard', '/chat/123?from=push',
-    '/checkin/123', '/checkout/123', '/reviews/123',
+    '/checkin/123', '/checkout/123', '/payment/123', '/reviews/123',
     '/notifications', '/settings/privacy', '/profile',
   ]) {
     await t.test(path, async () => {
@@ -26,7 +26,7 @@ test('confirmation callback without a code fails explicitly and keeps the destin
   assert.equal(response.status, 307);
   const destination = new URL(response.headers.get('location'), origin);
   assert.equal(destination.pathname, '/login');
-  assert.equal(destination.searchParams.get('reason'), 'confirmation_failed');
+  assert.equal(destination.searchParams.get('reason'), 'confirmation_invalid');
   assert.equal(destination.searchParams.get('redirect'), '/chat/123');
   assert.match(response.headers.get('cache-control'), /no-store/);
 });

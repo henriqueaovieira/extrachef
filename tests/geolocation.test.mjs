@@ -163,7 +163,9 @@ test('geocoder uses server-only endpoint/key and validates provider response', a
 test('job creation no longer captures publisher GPS and worker applications have no GPS gate', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.doesNotMatch(create, /getDeviceCoordinates|navigator\.geolocation/);
-  assert.match(create, /jobLocationValues\(resolved\)/);
+  assert.match(create, /rpc\('create_restaurant_demand'/);
+  assert.match(create, /p_location_source: selectedEvent \? 'event' : 'none'/);
+  assert.doesNotMatch(create, /p_latitude|p_longitude|resolveWorkLocation/);
   const worker = source('../app/worker/dashboard/page.tsx');
   const application = worker.slice(worker.indexOf('const handleApply'), worker.indexOf('const shareJob'));
   assert.match(application, /from\('applications'\)\.insert/);
