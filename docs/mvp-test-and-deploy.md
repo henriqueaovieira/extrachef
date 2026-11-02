@@ -21,16 +21,14 @@ Para padroes visuais, componentes e checklist mobile/acessibilidade, consulte
 - [ ] Receber notificações de aprovação, mensagem, check-in, check-out e avaliação.
 - [ ] Após o checkout, avaliar o trabalhador; confirmar que a nota aparece e que não é possível duplicá-la.
 - [ ] Conferir total de vagas, estados, profissionais contratados e média das avaliações no dashboard.
-- [ ] Criar evento; confirmar que aparece em `/restaurant/events` e em “Próximos eventos” no dashboard.
-- [ ] Validar a [Fase 2 de locais em eventos](./event-location-snapshots.md): local opcional, cópia independente, três estados e preservação do snapshot após edição/arquivamento da origem.
-- [ ] Abrir Eventos sem sessão: manter o aviso de login visível e o botão de criação desabilitado.
-- [ ] Alterar/encerrar a sessão depois de abrir o formulário: confirmar erro explícito no envio, sem inserir com a identidade anterior.
-- [ ] Simular falha na requisição de salvar evento: confirmar erro visível e botão liberado para tentar novamente, sem mensagem de sucesso.
-- [ ] Enviar formulário de evento incompleto: confirmar validação nativa e aviso dos campos obrigatórios.
-- [ ] Editar evento, mudar status para cancelado/concluído e confirmar atualização da lista/dashboard.
-- [ ] Excluir evento próprio e confirmar que desaparece das listagens.
-- [ ] Tentar evento com público zero/fracionário, horário final anterior ao inicial e título fora do tamanho; confirmar rejeição no formulário/banco.
-- [ ] Com outra conta de restaurante, tentar ler/editar/excluir o evento; confirmar bloqueio por RLS.
+- [ ] Aplicar a migration de [localização automática](./agenda-retirement-report.md) antes de publicar o frontend sem Agenda.
+- [ ] Confirmar ausência de Agenda no menu e HTTP 404 na antiga rota `/restaurant/events`.
+- [ ] Publicar demandas de 1, 2, 20 e 50 profissionais sem evento ou cadastro manual de local.
+- [ ] Confirmar snapshot do endereço principal do restaurante, `event_id` nulo e origem interna `catalog`.
+- [ ] Perfil sem endereço válido: erro explícito, sem publicar demanda sem localização.
+- [ ] Alterar o endereço no perfil e publicar novamente; preservar snapshots de demandas e eventos antigos.
+- [ ] Confirmar que URLs antigas com `?event=` não selecionam evento nem preenchem data.
+- [ ] Preservar o [contrato histórico de eventos](./event-location-snapshots.md) e os caminhos legados das RPCs.
 
 ### Trabalhador
 
@@ -45,7 +43,10 @@ Para padroes visuais, componentes e checklist mobile/acessibilidade, consulte
 - [ ] Avaliar o restaurante; confirmar atualização do score e bloqueio de duplicidade.
 - [ ] Conferir candidaturas, diárias concluídas, média, score e histórico no dashboard.
 - [ ] Completar/editar perfil com CPF, RG, foto, selfie, certificados e currículo; confirmar validação e upload privado.
-- [ ] Recusar GPS e confirmar que check-in/out são bloqueados, sem impedir busca ou candidatura; testar dentro/fora de 200 m em vagas novas e 300 m nas antigas.
+- [ ] Recusar GPS e confirmar que somente a emissão do código de check-in é bloqueada, sem impedir busca, candidatura, pagamento ou check-out.
+- [ ] Testar emissão dentro do raio, exatamente a 100 m e acima de 100 m do snapshot `jobs.work_latitude/work_longitude`; confirmar cálculo e bloqueio no backend.
+- [ ] Confirmar captura pontual apenas ao solicitar o código de check-in, sem rastreamento, polling GPS ou monitoramento em segundo plano.
+- [ ] Confirmar que GPS indisponível, timeout ou coordenadas ausentes da operação impedem emissão com erro explícito; a empresa continua confirmando chegada pelo código, sem solicitar GPS.
 - [ ] Compartilhar uma vaga pelo menu nativo; testar também o fallback de cópia.
 - [ ] Ativar Push no Perfil e confirmar recebimento/clique após aprovação, mensagem e avaliação.
 
@@ -53,8 +54,35 @@ Para padroes visuais, componentes e checklist mobile/acessibilidade, consulte
 
 - [ ] Completar/editar perfil com CNPJ, endereço, logo e fotos; confirmar rejeição de CNPJ inválido.
 - [ ] Capturar foto pela câmera traseira e testar substituição dos arquivos.
-- [ ] Validar o [catálogo independente Meus Locais](./work-locations.md): cadastro sem coordenadas, edição, padrão, arquivamento, restauração e exclusão.
-- [ ] Não aplicar a proposta operacional suspensa. Integrar somente eventos conforme a migration separada da Fase 2; vagas, GPS e geocodificação continuam fora do escopo.
+- [ ] Validar a [remoção de Meus Locais](./work-locations.md): sem página ou atalhos; manter o catálogo interno e o local principal automático na publicação.
+- [ ] Não aplicar a proposta operacional suspensa nem reaplicar migrations históricas.
+
+### GPS exclusivo do check-in
+
+A migration [20261019030000_checkin_gps.sql](../supabase/migrations/20261019030000_checkin_gps.sql)
+substitui `issue_operational_code(uuid,text)` por
+`issue_operational_code(uuid,text,double precision,double precision)`.
+Os parâmetros `p_latitude/p_longitude` têm default nulo para preservar chamadas de
+check-out com dois argumentos; check-in sem coordenadas é recusado no backend.
+Não há overload antigo que permita emitir código de check-in sem GPS.
+
+Aplicar somente após conferir as dependências já implantadas: fluxo de códigos
+operacionais e snapshot `jobs.work_latitude/work_longitude`. Publicar o frontend
+compatível junto da migration; clientes antigos não poderão emitir check-in sem
+enviar coordenadas. A migration não altera tabelas nem registros existentes.
+Não foi aplicada automaticamente ao Supabase.
+
+A distância Haversine é comparada sem arredondamento com 100 metros. Coordenadas
+legadas `jobs.latitude/longitude`, endereço atual do restaurante e distância
+calculada pelo navegador não são usados como autoridade. Operações sem snapshot
+válido ficam bloqueadas, sem fallback ou ampliação do raio pela precisão do GPS.
+
+A posição é consultada uma vez por solicitação do profissional e não é persistida
+por esta alteração. Códigos já emitidos continuam com a validade original; nova
+emissão, renovação ou solicitação de reutilização pela RPC exige GPS no check-in.
+A confirmação bilateral, os horários oficiais, pagamento, check-out, notificações
+e reputação permanecem com as regras anteriores. GPS do navegador não é prova
+contra falsificação e não comprova permanência após a emissão.
 
 ### Segurança e interface
 

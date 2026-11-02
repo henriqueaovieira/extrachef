@@ -1,10 +1,11 @@
 import Link from 'next/link';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 export default function Home() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f6f3] px-6 py-16">
       <section className="w-full max-w-xl space-y-6 rounded-xl border border-gray-200 bg-white p-8 shadow-sm sm:p-10">
-        <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
+        <DashboardLogo />
         <h1 className="text-3xl font-bold text-gray-950">Plantões melhores começam aqui.</h1>
         <p className="max-w-prose text-gray-600">
           Encontre profissionais para sua operação ou descubra novas oportunidades na cozinha.

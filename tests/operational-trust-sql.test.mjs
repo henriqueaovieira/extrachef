@@ -22,7 +22,9 @@ test('operational codes, payment, interruptions, review gates and reputation exe
     CREATE TYPE application_status AS ENUM('pending','approved','in_progress','completed','rejected');
     CREATE TABLE jobs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),demand_id uuid DEFAULT gen_random_uuid(),
       restaurant_id uuid REFERENCES users(id),title text,job_date date,start_time time,end_time time,
-      value numeric,status job_status,location_name text,work_address text,created_at timestamptz DEFAULT now(),demand_archived_at timestamptz);
+      value numeric,status job_status,location_name text,work_address text,created_at timestamptz DEFAULT now(),demand_archived_at timestamptz,
+      work_latitude double precision DEFAULT 0,work_longitude double precision DEFAULT 0,
+      latitude double precision DEFAULT 60,longitude double precision DEFAULT 60);
     CREATE TABLE applications(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),job_id uuid REFERENCES jobs(id),
       worker_id uuid REFERENCES users(id),status application_status,UNIQUE(job_id,worker_id));
     CREATE TABLE checkins(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),job_id uuid UNIQUE REFERENCES jobs(id),worker_id uuid,checkin_time timestamptz);
@@ -46,6 +48,7 @@ test('operational codes, payment, interruptions, review gates and reputation exe
   `);
   await db.exec(source('20261014035000_job_reviews.sql'));
   await db.exec(source('20261017030000_operational_trust.sql'));
+  await db.exec(source('20261019030000_checkin_gps.sql'));
   const query = async (sql, args = []) => (await db.query(sql, args)).rows;
   const scalar = async (sql, args = []) => Object.values((await query(sql, args))[0])[0];
   const login = async (n) => db.exec(`RESET ROLE; SET request.jwt.claim.sub='${n ? id(n) : ''}'; SET ROLE authenticated;`);
@@ -61,14 +64,48 @@ test('operational codes, payment, interruptions, review gates and reputation exe
     return job;
   };
   const context = (job) => scalar('SELECT operational_context($1)', [job]);
-  const issue = (job, stage) => scalar('SELECT issue_operational_code($1,$2)', [job,stage]);
+  const issue = (job, stage) => stage === 'checkin'
+    ? scalar('SELECT issue_operational_code($1,$2,$3,$4)', [job,stage,0,0])
+    : scalar('SELECT issue_operational_code($1,$2)', [job,stage]);
+  const issueAt = (job, latitude, longitude) =>
+    scalar("SELECT issue_operational_code($1,'checkin',$2,$3)", [job,latitude,longitude]);
   const validate = (job, stage, code) => scalar('SELECT validate_operational_code($1,$2,$3)', [job,stage,code]);
   const pay = (job, action) => scalar('SELECT record_operational_payment($1,$2)', [job,action]);
   const reputation = (worker = 2) => scalar('SELECT worker_operational_reputation($1)', [id(worker)]);
   const first = await hire({ date:'yesterday' });
   await login(2);
   assert.equal((await reputation()).score,70);
+  assert.equal(await scalar("SELECT to_regprocedure('public.issue_operational_code(uuid,text)')"), null);
+  const notificationsBeforeGps = await scalar('SELECT count(*) FROM notifications');
+  await assert.rejects(scalar("SELECT issue_operational_code($1,'checkin')", [first]), /localização válida/);
+  for (const [latitude, longitude] of [
+    [null, 0], [0, null], [91, 0], [-91, 0], [0, 181], [0, -181],
+    [NaN, 0], [0, NaN], [Infinity, 0], [-Infinity, 0], [0, Infinity], [0, -Infinity],
+  ]) {
+    await assert.rejects(issueAt(first, latitude, longitude), /localização válida/);
+  }
+  const latitudeAt = (meters) => meters / 6371000 * 180 / Math.PI;
+  await assert.rejects(issueAt(first, latitudeAt(100.001), 0), /raio de 100 metros/);
+  await assert.rejects(issueAt(first, latitudeAt(300), 0), /raio de 100 metros/);
+  for (const [latitude, longitude] of [[null, 0], [0, null], [NaN, 0], [0, Infinity], [91, 0], [0, 181]]) {
+    await db.exec('RESET ROLE');
+    await query('UPDATE jobs SET work_latitude=$2,work_longitude=$3 WHERE id=$1', [first,latitude,longitude]);
+    await login(2);
+    await assert.rejects(issueAt(first, 0, 0), /operação não possui coordenadas válidas/);
+  }
+  assert.equal(await scalar('SELECT count(*) FROM notifications'), notificationsBeforeGps);
+  assert.equal((await context(first)).has_code, false);
+  assert.equal((await context(first)).checkin_at, null);
+  await db.exec('RESET ROLE');
+  assert.equal(await scalar('SELECT count(*) FROM operational_codes'), 0);
+  await query('UPDATE jobs SET work_latitude=0,work_longitude=0 WHERE id=$1', [first]);
+  await login(2);
+  const boundaryCode = (await issueAt(first, latitudeAt(100), 0)).code;
+  assert.match(boundaryCode, /^[A-F0-9]{8}$/);
+  assert.equal((await issueAt(first, latitudeAt(99.999), 0)).code, boundaryCode);
+  await assert.rejects(issueAt(first, latitudeAt(100.001), 0), /raio de 100 metros/);
   const checkin = await issue(first,'checkin');
+  assert.equal(checkin.code, boundaryCode);
   assert.match(checkin.code,/^[A-F0-9]{8}$/);
   assert.equal((await issue(first,'checkin')).code,checkin.code);
   await assert.rejects(validate(first,'checkin',checkin.code),/Somente a empresa/);
@@ -112,9 +149,16 @@ test('operational codes, payment, interruptions, review gates and reputation exe
   await login(1);
   const checkout = await context(first);
   assert.match(checkout.code,/^[A-F0-9]{8}$/);
+  await db.exec('RESET ROLE');
+  await query('UPDATE jobs SET work_latitude=NULL,work_longitude=NULL WHERE id=$1', [first]);
+  await query("UPDATE operational_codes SET expires_at=now()-interval '1 second' WHERE stage='checkout'");
+  await login(1);
+  const renewedCheckout = await issue(first, 'checkout');
+  assert.match(renewedCheckout.code, /^[A-F0-9]{8}$/);
+  assert.equal((await scalar("SELECT issue_operational_code($1,'checkout',$2,$3)", [first,NaN,Infinity])).code, renewedCheckout.code);
   await assert.rejects(validate(first,'checkout',checkout.code),/recebimento/);
   await login(2);
-  const finished = await validate(first,'checkout',checkout.code);
+  const finished = await validate(first,'checkout',renewedCheckout.code);
   assert.equal(finished.phase,'completed');
   assert.equal(finished.review_pending,true);
   assert.equal((await query('SELECT * FROM pending_operational_reviews()')).length,1);
@@ -239,5 +283,6 @@ test('operational codes, payment, interruptions, review gates and reputation exe
   assert.equal((await reputation(4)).cancellations_90d,0);
   await db.exec('RESET ROLE; SET ROLE anon');
   await assert.rejects(context(first),/permission denied/);
+  await assert.rejects(issueAt(first, 0, 0), /permission denied/);
   await assert.rejects(query('SELECT process_operational_schedule()'),/permission denied/);
 });

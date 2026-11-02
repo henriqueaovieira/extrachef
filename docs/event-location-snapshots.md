@@ -1,5 +1,10 @@
 # Fase 2: eventos com snapshot do catalogo
 
+> Contrato historico preservado. A interface Agenda/Eventos foi descontinuada.
+> Demandas novas usam automaticamente o endereco principal do restaurante,
+> sem evento. Ver [relatorio e implantacao](./agenda-retirement-report.md).
+> As instrucoes abaixo sobre a entrega original nao autorizam reaplicar migrations.
+
 ## Escopo e arquitetura
 
 Implementacao preparada, **sem execucao de SQL nesta entrega**, nem mesmo em
@@ -128,29 +133,14 @@ RLS/permissoes:
   constraints, propriedade e incremento de revisao. Nao foi criado trigger
   generico para clientes privilegiados.
 
-## Frontend e navegacao
+## Frontend e navegacao apos descontinuacao
 
-- [Eventos](../app/components/restaurant-events.tsx) carrega eventos e catalogo
-  separadamente, com paginacao e erros visiveis.
-- Novo evento pode selecionar local ativo ou **Definir depois / sem local**.
-- O padrao e apenas uma sugestao quando o catalogo ja estiver carregado ao
-  abrir um novo formulario. Se carregar depois, nao muda a escolha do usuario.
-- Edicao sempre inicia em **Manter local salvo neste evento**, mesmo para
-  evento sem local, origem arquivada ou catalogo indisponivel.
-- Uma selecao mostra nome, numero, bairro, cidade, UF, CEP e estado das coordenadas.
-- As tres etiquetas sao exibidas nos cards de eventos e proximos eventos
-  no [dashboard](../app/restaurant/dashboard/page.tsx).
-- Meus Locais/Cadastrar local abre nova aba, preservando o formulario.
-  Depois, **Atualizar catalogo** recupera os locais sem limpar os campos.
-- Erro no catalogo permite salvar sem local ou manter snapshot existente;
-  uma nova copia exige consulta bem-sucedida e revisao confirmada.
-- Sem schema da Fase 2, a lista mostra erro com opcao de atualizar,
-  nunca um falso estado vazio.
-- Salvamento usa somente a RPC. A UI atualiza usando o registro retornado.
-- Duplo clique e mutacoes concorrentes sao bloqueados; revisao do evento
-  protege edicoes e exclusoes obsoletas. Conflito preserva o formulario;
-  cancelar, atualizar eventos e reabrir antes de repetir.
-- Erros de FK na exclusao do catalogo orientam manter o local arquivado.
+- A rota visual `/restaurant/events`, seu componente e atalhos foram removidos.
+- A criacao de demandas nao consulta eventos nem aceita sua pre-selecao por URL.
+- A RPC `save_restaurant_event`, revisoes, RLS, FKs e snapshots continuam intactos.
+- Clientes legados com origem event/catalog/none continuam compativeis.
+- O dashboard atual e baseado em demandas/vagas; nao exibe uma agenda de eventos.
+- O contrato de snapshots abaixo permanece documentado para dados historicos.
 
 ## Aplicacao futura: ordem segura
 

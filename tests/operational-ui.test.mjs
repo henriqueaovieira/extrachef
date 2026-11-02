@@ -31,21 +31,31 @@ const context = (overrides = {}) => ({
 function mount(initial, file = '../app/components/operational-panel.tsx') {
   const previousWindow = globalThis.window;
   const listeners = new Map();
+  let interval;
   globalThis.window = {
     location: { search: '' },
-    setInterval: () => 1, clearInterval() {},
+    setInterval: callback => { interval = callback; return 1; }, clearInterval() {},
     addEventListener: (event, callback) => listeners.set(event, callback),
     removeEventListener: (event) => listeners.delete(event),
   };
   const state = [], effects = [];
   let cursor, effectCursor, tree, dirty = true;
   const db = {
-    value: initial, failure: null, calls: [], pendingReviews: [], navigation: [],
+    value: initial, failure: null, rpcError: null, geocodingError: null, calls: [], queries: [], pendingReviews: [], navigation: [], geocoded: [],
+    gpsCalls: 0, gpsError: null, coordinates: { latitude: -23.5, longitude: -46.6, accuracy: 10 },
     auth: { getUser: async () => ({ data: { user: { id: 'company' } }, error: null }) },
-    from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) }),
+    from: (table) => {
+      db.queries.push(table);
+      return { select: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) };
+    },
     async rpc(name, args) {
       db.calls.push({ name, args });
       if (name === 'pending_operational_reviews') return { data: db.pendingReviews, error: null };
+      if (db.rpcError) return { data: null, error: db.rpcError };
+      if (name === 'save_geocoded_work_location') return { data: {
+        id: 'operation-location', revision: 1, geocoding_status: 'resolved', latitude: -23.5, longitude: -46.6,
+      }, error: null };
+      if (name === 'create_restaurant_demand') return { data: 'published-demand', error: null };
       return name === 'operational_context' ? { data: db.value, error: null }
         : db.failure ? { data: db.failure, error: null } : { data: db.value, error: null };
     },
@@ -72,6 +82,24 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
     '@/app/components/mobile-bottom-nav': { default: () => null },
     '@/lib/supabase/client': { createClient: () => db },
     '@/lib/operations': operations,
+    '@/lib/geolocation': {
+      getDeviceCoordinates: async () => {
+        db.gpsCalls++;
+        if (db.gpsError) throw new Error(db.gpsError);
+        return db.coordinates;
+      },
+    },
+    '@/lib/work-location': {
+      emptyWorkLocation: { location_name: '', address: '', number: '', neighborhood: '', city: '', state: '', postal_code: '', latitude: null, longitude: null },
+      validCoordinates: (latitude, longitude) => Number.isFinite(latitude) && Math.abs(latitude) <= 90
+        && Number.isFinite(longitude) && Math.abs(longitude) <= 180,
+      resolveWorkLocation: async location => {
+        db.geocoded.push(location);
+        if (db.geocodingError) throw new Error(db.geocodingError);
+        return { ...location, latitude: -23.5, longitude: -46.6 };
+      },
+    },
+    '@/lib/specialties': { commonSpecialties: ['Garçom', 'Eventos', 'Bar', 'Buffet', 'Atendimento', 'Cozinha', 'Auxiliar', 'Bartender'] },
   }).default;
   function elements(node) {
     if (!node || typeof node !== 'object') return [];
@@ -80,6 +108,7 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
   }
   return {
     db, elements: () => elements(tree),
+    refresh: () => { interval(); listeners.get('focus')(); },
     html: () => renderToStaticMarkup(tree),
     button(label) {
       const button = elements(tree).find(node => node.type === ui.Button && node.props.children === label);
@@ -130,11 +159,16 @@ test('worker emits arrival code, company validates it and errors never become su
   try {
     await app.flush();
     assert.doesNotMatch(app.html(), /id="operational-code"/);
+    assert.equal(app.db.gpsCalls, 0);
     app.db.value = context({ code: 'A1B2C3D4', code_expires_at: '2099-01-01T00:00:00Z' });
     app.button('Realizar Check-in').props.onClick();
     await app.flush();
     assert.match(app.html(), /A1B2C3D4/);
     assert.equal(app.db.calls.at(-1).name, 'issue_operational_code');
+    assert.equal(app.db.gpsCalls, 1);
+    assert.deepEqual(app.db.calls.at(-1).args, {
+      p_job_id: 'job', p_stage: 'checkin', p_latitude: -23.5, p_longitude: -46.6,
+    });
   } finally { app.unmount(); }
   const company = mount(context({ role: 'restaurant', has_code: true }));
   try {
@@ -147,9 +181,68 @@ test('worker emits arrival code, company validates it and errors never become su
     company.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
     await company.flush();
     assert.equal(company.db.calls.at(-1).args.p_code, 'DEADBEEF');
+    assert.equal(company.db.gpsCalls, 0);
     assert.match(company.html(), /Código incorreto/);
     assert.doesNotMatch(company.html(), /Check-in confirmado/);
   } finally { company.unmount(); }
+});
+
+test('GPS failure prevents issuing a check-in code and allows a fresh retry', async () => {
+  for (const message of [
+    'Permita o acesso à localização para utilizar este recurso.',
+    'Não foi possível obter sua localização a tempo. Tente novamente.',
+    'Não foi possível obter sua localização. Verifique o GPS e tente novamente.',
+  ]) {
+    const app = mount(context());
+    try {
+      await app.flush();
+      app.db.gpsError = message;
+      app.button('Realizar Check-in').props.onClick();
+      await app.flush();
+      assert.ok(app.html().includes(message));
+      assert.equal(app.db.calls.filter(call => call.name === 'issue_operational_code').length, 0);
+      assert.equal(app.button('Realizar Check-in').props.busy, false);
+      app.db.gpsError = null;
+      app.db.rpcError = { message: 'Você está fora do raio de 100 metros do local da operação.' };
+      app.button('Realizar Check-in').props.onClick();
+      await app.flush();
+      assert.match(app.html(), /fora do raio de 100 metros/);
+      assert.doesNotMatch(app.html(), /Código gerado/);
+      assert.equal(app.db.gpsCalls, 2);
+    } finally { app.unmount(); }
+  }
+});
+
+test('existing check-in codes, refresh and checkout never request GPS', async () => {
+  const existing = mount(context({ code: 'A1B2C3D4', code_expires_at: '2099-01-01T00:00:00Z' }));
+  try {
+    await existing.flush();
+    assert.match(existing.html(), /A1B2C3D4/);
+    existing.refresh();
+    await existing.flush();
+    assert.equal(existing.db.gpsCalls, 0);
+  } finally { existing.unmount(); }
+  const company = mount(context({ role: 'restaurant', phase: 'checkout' }));
+  try {
+    await company.flush();
+    company.db.gpsError = 'GPS indisponível';
+    company.button('Gerar código de Checkout').props.onClick();
+    await company.flush();
+    assert.equal(company.db.gpsCalls, 0);
+    assert.deepEqual(company.db.calls.at(-1).args, { p_job_id: 'job', p_stage: 'checkout' });
+  } finally { company.unmount(); }
+  const worker = mount(context({ phase: 'checkout' }));
+  try {
+    await worker.flush();
+    worker.elements().find(node => node.type === ui.TextInput).props.onChange({ target: { value: 'deadbeef' } });
+    await worker.flush();
+    worker.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    await worker.flush();
+    assert.equal(worker.db.gpsCalls, 0);
+    assert.deepEqual(worker.db.calls.at(-1).args, {
+      p_job_id: 'job', p_stage: 'checkout', p_code: 'DEADBEEF',
+    });
+  } finally { worker.unmount(); }
 });
 
 test('assisted absence confirmation is visible outside collapsed secondary actions', async () => {
@@ -183,6 +276,7 @@ test('worker receipt confirmation unlocks checkout validation without exposing t
     app.db.value = context({ phase: 'checkout', receipt_confirmed_at: '2026-10-18T02:05:00Z', has_code: true });
     app.button('Recebi').props.onClick();
     await app.flush();
+    assert.equal(app.db.gpsCalls, 0);
     assert.match(app.html(), /Recebimento confirmado. Checkout liberado/);
     assert.match(app.html(), /Validar Checkout/);
     assert.doesNotMatch(app.html(), /Gerar código de Checkout/);
@@ -202,20 +296,50 @@ test('publication persists before optional invitations and skipping never republ
   const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
   try {
     await app.flush();
-    const amount = app.elements().find(node => node.type === ui.TextInput && node.props.type === 'number' && node.props.id !== 'demand-quantity');
-    assert.ok(amount);
-    amount.props.onChange({ target: { value: '150' } });
+    const fields = {
+      'operation-role': 'Garçom',
+      'operation-date': '2099-01-01',
+      'operation-start-time': '18:00',
+      'operation-end-time': '23:00',
+      'operation-daily-rate': '150',
+      'operation-street': 'Rua das Flores',
+      'operation-number': '120',
+      'operation-city': 'São Paulo',
+      'operation-state': 'SP',
+      'operation-details': 'Detalhes do plantão',
+    };
+    for (const [id, value] of Object.entries(fields)) {
+      const input = app.elements().find(node => node.props.id === id);
+      assert.ok(input, id);
+      input.props.onChange({ target: { value } });
+    }
     await app.flush();
+    assert.match(app.html(), /Publicar Operação/);
     await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
     await app.flush();
-    assert.match(app.html(), /Demanda publicada com sucesso/);
+    assert.match(app.html(), /Operação publicada com sucesso/);
     assert.match(app.html(), /href="\/restaurant\/demands\/published-demand\?view=talents"/);
     assert.match(app.html(), /Convidar Agora/);
     app.button('Pular').props.onClick();
     assert.deepEqual(app.db.navigation, ['/restaurant/demands/published-demand']);
-    assert.deepEqual(app.db.calls.map(call => call.name), ['pending_operational_reviews', 'create_restaurant_demand']);
+    assert.deepEqual(app.db.calls.map(call => call.name), ['pending_operational_reviews', 'save_geocoded_work_location', 'create_restaurant_demand']);
     assert.equal(app.db.calls.at(-1).args.p_value, 150);
     assert.equal(app.db.calls.at(-1).args.p_quantity, 1);
+    assert.equal(app.db.calls.at(-1).args.p_title, 'Garçom');
+    assert.equal(app.db.calls.at(-1).args.p_description, 'Detalhes do plantão');
+    assert.equal(app.db.calls.at(-1).args.p_location_source, 'catalog');
+    assert.equal(app.db.calls.at(-1).args.p_work_location_id, 'operation-location');
+    assert.equal(app.db.calls.at(-1).args.p_location_revision, 1);
+    assert.equal(Object.hasOwn(app.db.calls.at(-1).args, 'p_event_id'), false);
+    assert.deepEqual(app.db.geocoded, [{
+      location_name: 'Local da Operação', address: 'Rua das Flores', number: '120', neighborhood: '',
+      city: 'São Paulo', state: 'SP', postal_code: '', latitude: null, longitude: null,
+    }]);
+    assert.deepEqual(app.db.calls.at(-2).args, {
+      p_name: 'Local da Operação', p_address: 'Rua das Flores', p_number: '120',
+      p_city: 'São Paulo', p_state: 'SP', p_latitude: -23.5, p_longitude: -46.6,
+    });
+    assert.deepEqual(app.db.queries, []);
   } finally { app.unmount(); }
 });
 
@@ -227,5 +351,98 @@ test('pending reviews block the creation form without blocking access to the eva
     assert.match(app.html(), /href="\/reviews\/previous"/);
     assert.doesNotMatch(app.html(), /<form|Convidar Agora/);
     assert.deepEqual(app.db.calls.map(call => call.name), ['pending_operational_reviews']);
+  } finally { app.unmount(); }
+});
+
+test('operation publication uses existing specialty and work-location contracts for one vacancy', async () => {
+  const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
+  globalThis.window.location.search = '?event=old-event&event_id=old-event';
+  try {
+    await app.flush();
+    assert.doesNotMatch(app.html(), />[^<]*(?:Evento|Agenda|demanda|Demanda|Profissionais necessários|quantidade de profissionais)/);
+    assert.match(app.html(), /Publique uma oportunidade e receba candidaturas de profissionais disponíveis/);
+    assert.match(app.html(), /Quando\?/);
+    assert.match(app.html(), /Local da Operação/);
+    assert.doesNotMatch(app.html(), /CEP|Bairro|País|Latitude|Longitude|endereço principal/);
+    const date = app.elements().find(node => node.type === ui.TextInput && node.props.type === 'date');
+    assert.equal(date.props.value, '');
+    const fields = {
+      'operation-role': 'Garçom',
+      'operation-date': '2099-01-01',
+      'operation-start-time': '22:00',
+      'operation-end-time': '03:00',
+      'operation-daily-rate': '180',
+      'operation-street': 'Rua das Flores',
+      'operation-number': '120',
+      'operation-city': 'São Paulo',
+      'operation-state': 'SP',
+      'operation-details': 'Informações da operação',
+    };
+    for (const [id, value] of Object.entries(fields)) {
+      const input = app.elements().find(node => node.props.id === id);
+      assert.ok(input, id);
+      input.props.onChange({ target: { value } });
+    }
+    await app.flush();
+    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    assert.deepEqual(app.db.calls.at(-2), { name: 'save_geocoded_work_location', args: {
+      p_name: 'Local da Operação', p_address: 'Rua das Flores', p_number: '120',
+      p_city: 'São Paulo', p_state: 'SP', p_latitude: -23.5, p_longitude: -46.6,
+    } });
+    assert.deepEqual(app.db.calls.at(-1), { name: 'create_restaurant_demand', args: {
+      p_title: 'Garçom', p_description: 'Informações da operação', p_job_date: '2099-01-01',
+      p_start_time: '22:00', p_end_time: '03:00', p_value: 180, p_quantity: 1,
+      p_location_source: 'catalog', p_work_location_id: 'operation-location', p_location_revision: 1,
+    } });
+    assert.deepEqual(app.db.queries, []);
+    assert.match(app.html(), /Operação publicada com sucesso/);
+  } finally { app.unmount(); }
+});
+
+test('work-location RPC errors remain visible and never publish without the submitted location', async () => {
+  const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
+  app.db.rpcError = { message: 'Não foi possível salvar o local informado.' };
+  try {
+    await app.flush();
+    const amount = app.elements().find(node => node.type === ui.TextInput && node.props.id === 'operation-daily-rate');
+    amount.props.onChange({ target: { value: '150' } });
+    await app.flush();
+    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    assert.match(app.html(), /Não foi possível salvar o local informado/);
+    assert.doesNotMatch(app.html(), /Operação publicada com sucesso/);
+    assert.equal(app.db.calls.filter(call => call.name === 'create_restaurant_demand').length, 0);
+    assert.equal(app.db.calls.at(-1).name, 'save_geocoded_work_location');
+    assert.equal(app.elements().find(node => node.type === 'fieldset').props.disabled, false);
+  } finally { app.unmount(); }
+});
+
+test('operation cannot be published when geocoding fails', async () => {
+  const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
+  app.db.geocodingError = 'Endereço não localizado.';
+  try {
+    await app.flush();
+    const fields = {
+      'operation-role': 'Garçom',
+      'operation-date': '2099-01-01',
+      'operation-start-time': '18:00',
+      'operation-end-time': '23:00',
+      'operation-daily-rate': '150',
+      'operation-street': 'Rua Inexistente',
+      'operation-number': '120',
+      'operation-city': 'São Paulo',
+      'operation-state': 'SP',
+      'operation-details': 'Informações da operação',
+    };
+    for (const [id, value] of Object.entries(fields)) {
+      app.elements().find(node => node.props.id === id).props.onChange({ target: { value } });
+    }
+    await app.flush();
+    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    await app.flush();
+    assert.match(app.html(), /Endereço não localizado/);
+    assert.equal(app.db.calls.filter(call => call.name === 'save_geocoded_work_location').length, 0);
+    assert.equal(app.db.calls.filter(call => call.name === 'create_restaurant_demand').length, 0);
   } finally { app.unmount(); }
 });

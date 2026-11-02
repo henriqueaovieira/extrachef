@@ -103,7 +103,7 @@ test('proxy preserves the requested route when authentication is absent', async 
 });
 
 test('invalid existing session includes session_expired', async () => {
-  const request = new NextRequest('https://app.test/restaurant/events', {
+  const request = new NextRequest('https://app.test/restaurant/demands', {
     headers: { Cookie: 'sb-example-auth-token.0=expired' },
   });
   const response = await proxyWith({
@@ -114,7 +114,7 @@ test('invalid existing session includes session_expired', async () => {
 
 test('opposite-role navigation redirects to the correct dashboard with a friendly reason', async () => {
   for (const [role, path, expected] of [
-    ['worker', '/restaurant/events', '/worker/dashboard'],
+    ['worker', '/restaurant/demands', '/worker/dashboard'],
     ['restaurant', '/worker/profile', '/restaurant/dashboard'],
   ]) {
     const response = await proxyWith({ user: { id: 'test-user' }, role })(
@@ -128,7 +128,7 @@ test('opposite-role navigation redirects to the correct dashboard with a friendl
 
 test('valid users can access their role namespace and shared routes', async () => {
   for (const [role, path] of [
-    ['worker', '/worker/dashboard'], ['restaurant', '/restaurant/events'],
+    ['worker', '/worker/dashboard'], ['restaurant', '/restaurant/demands'],
     ['worker', '/notifications'], ['restaurant', '/chat/123'],
   ]) {
     const response = await proxyWith({ user: { id: 'test-user' }, role })(
@@ -143,7 +143,7 @@ test('valid users can access their role namespace and shared routes', async () =
 test('missing or invalid profile is never silently treated as a worker', async () => {
   for (const role of [null, 'admin']) {
     const response = await proxyWith({ user: { id: 'test-user' }, role })(
-      new NextRequest('https://app.test/restaurant/events'),
+      new NextRequest('https://app.test/restaurant/demands'),
     );
     assert.equal(new URL(response.headers.get('location')).searchParams.get('reason'), 'profile_unavailable');
   }

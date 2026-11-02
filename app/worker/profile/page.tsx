@@ -1,5 +1,5 @@
-import ProfileOverview from '@/app/components/profile-overview';
+import MoreNavigation from '@/app/components/more-navigation';
 
 export default function WorkerProfilePage() {
-  return <ProfileOverview role="worker" />;
+  return <MoreNavigation role="worker" />;
 }

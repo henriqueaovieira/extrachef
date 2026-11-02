@@ -26,7 +26,7 @@ Esta revisao nao e uma certificacao de seguranca de toda a aplicacao.
 | Storage | `worker-private` privado, `restaurant-assets` publico; policies por pasta do dono | Policies existem na migration de perfis; validar configuracao implantada |
 | Verificacao | `users.verified` e `worker_profiles.verification_status` | Worker podia escrever `verified` no proprio status |
 | Push/PWA | SW, subscriptions, dispatcher, recibos e offline publico | Entrega real Android/iPhone e webhook nao comprovados por testes locais |
-| Eventos | CRUD com RLS de restaurante | Reutilizado sem criar outro modulo |
+| Eventos | Infraestrutura historica com RLS de restaurante | Interface descontinuada; demandas nao dependem da Agenda |
 | Auditoria/erros | Logs pontuais e historico de entrega Push | Sem trilha global `audit_logs` ou `system_errors` nas migrations locais |
 | Saude | `/api/push/status` autenticado | Nao equivale a health check completo dos servicos |
 | Sessoes por dispositivo | Auth gerenciado pelo Supabase | Sem listagem/revogacao individual na aplicacao |
@@ -176,7 +176,7 @@ Eles nao comprovam login, refresh ou policies no Supabase remoto.
 - [ ] Sem login, cada namespace protegido redireciona a login preservando rota e query.
 - [ ] Login worker e restaurante sem redirect levam ao dashboard correto.
 - [ ] Login com `/chat/<vaga-autorizada>` volta ao chat; RLS continua recusando vaga alheia.
-- [ ] Worker em `/restaurant/events` e restaurante em `/worker/dashboard`: dashboard proprio e aviso.
+- [ ] Worker em `/restaurant/demands` e restaurante em `/worker/dashboard`: dashboard proprio e aviso.
 - [ ] `redirect=https://google.com`, `//malicioso.com`, URL codificada e caminho de login: fallback interno.
 - [ ] Link "Cadastre-se" e "Faca login" preservam redirect.
 - [ ] Cadastro com confirmacao desligada cria exatamente um perfil e volta ao destino.

@@ -25,7 +25,7 @@ export function ReputationDetails({ reputation }: { reputation: OperationalReput
   </section>;
 }
 
-export default function OperationalReputationView({ workerId }: { workerId?: string }) {
+export default function OperationalReputationView({ workerId, summary = false }: { workerId?: string; summary?: boolean }) {
   const [supabase] = useState(() => createClient());
   const [reputation, setReputation] = useState<OperationalReputation | null>(null);
   const [error, setError] = useState('');
@@ -46,12 +46,32 @@ export default function OperationalReputationView({ workerId }: { workerId?: str
         if (error) throw new Error(error.message);
         if (active) setReputation(data);
       } catch (error) {
-        if (active) setError(error instanceof Error ? error.message : 'Não foi possível consultar a reputação.');
+        console.error('Operational reputation lookup failed.', error);
+        if (active) setError('Não foi possível carregar sua confiança operacional.');
       } finally { if (active) setLoading(false); }
     }
     void load();
     return () => { active = false; };
   }, [retry, supabase, workerId]);
+  if (summary) {
+    const cardClassName = 'flex min-h-32 min-w-0 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 sm:p-5';
+    if (loading) return <article className={cardClassName}><p className="break-words text-sm text-gray-500">—</p><p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">Confiança</p></article>;
+    if (error) return <article className={cardClassName}>
+      <p className="break-words text-sm text-gray-500">—</p>
+      <p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">Confiança</p>
+    </article>;
+    if (!reputation) return <article className={cardClassName}>
+      <p className="break-words text-sm text-gray-500">—</p>
+      <p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">Confiança</p>
+    </article>;
+    return <article className={cardClassName}>
+      <div>
+        <p className="break-words text-2xl font-semibold tabular-nums text-gray-950">{Number(reputation.score).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}<span className="text-sm font-medium text-gray-500"> / 100</span></p>
+        <p className="mt-1 break-words text-xs font-medium text-orange-800 sm:text-sm">{reputation.classification}</p>
+      </div>
+      <p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">Confiança</p>
+    </article>;
+  }
   return loading ? <LoadingSkeleton label="Carregando reputação..." /> : error ? <Toast tone="error"><p>{error}</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="px-0 underline">Tentar novamente</Button></Toast>
     : reputation ? <ReputationDetails reputation={reputation} /> : <p className="text-sm text-gray-500">Indicadores não compartilhados pelo profissional.</p>;
 }

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
-import CommunicationNavigation from '@/app/components/communication-navigation';
+import { DashboardAvatar, DashboardLogo } from '@/app/components/dashboard-identity';
 import { demandWindow } from '@/lib/demands';
 import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
 
@@ -36,10 +36,12 @@ export default function WorkerApplicationsPage() {
   const [reviews, setReviews] = useState<PendingReview[]>([]);
   const [operationsError, setOperationsError] = useState('');
   const [clock, setClock] = useState(() => new Date());
+  const [profile, setProfile] = useState<{ name: string; photoUrl: string | null }>({ name: '', photoUrl: null });
 
   useEffect(() => {
     let active = true;
     let refreshing = false;
+    let identityLoaded = false;
     async function loadApplications() {
       if (refreshing) return;
       refreshing = true;
@@ -52,8 +54,31 @@ export default function WorkerApplicationsPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('applications')
+      if (!identityLoaded) {
+        identityLoaded = true;
+        const [profileResult, photoResult] = await Promise.all([
+          supabase.from('public_user_directory').select('name').eq('id', user.id).single(),
+          supabase.from('worker_profiles').select('profile_photo_path').eq('user_id', user.id).maybeSingle(),
+        ]);
+        if (profileResult.error) {
+          console.error('Worker profile lookup failed.', profileResult.error);
+        } else {
+          setProfile((current) => ({ ...current, name: profileResult.data?.name ?? '' }));
+        }
+        if (photoResult.error) {
+          console.error('Worker profile photo lookup failed.', photoResult.error);
+        } else if (photoResult.data?.profile_photo_path) {
+          const { data: signedPhoto, error: photoError } = await supabase.storage
+            .from('worker-private')
+            .createSignedUrl(photoResult.data.profile_photo_path, 60 * 10);
+          if (photoError) console.error('Worker profile photo signing failed.', photoError);
+          else if (active && signedPhoto?.signedUrl) {
+            setProfile((current) => ({ ...current, photoUrl: signedPhoto.signedUrl }));
+          }
+        }
+      }
+
+      const { data, error } = await supabase.from('applications')
         .select(`
           id,
           job_id,
@@ -97,25 +122,32 @@ export default function WorkerApplicationsPage() {
     rejected: 'Não selecionada',
   };
 
+  const visibleApplications = applications.filter(
+    (application): application is Application & { job: NonNullable<Application['job']> } => application.job !== null,
+  );
+
   return (
-    <main className="min-h-screen bg-gray-50 pb-28 md:pb-8">
-      <header className="border-b border-gray-200 bg-white">
-        <div className="mx-auto flex min-h-16 max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-2">
-          <Link href="/worker/dashboard" className="text-lg font-bold text-orange-600">
-            ExtraChef
-          </Link>
-          <CommunicationNavigation role="worker" />
-          <Link href="/worker/dashboard" className="text-sm font-medium text-gray-700 hover:text-orange-600">
-            Voltar às vagas
-          </Link>
+    <main className="min-h-screen bg-white pb-[calc(8rem+env(safe-area-inset-bottom))] text-gray-950">
+      <header className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12">
+        <div className="mb-8 flex items-center justify-between">
+          <DashboardLogo role="worker" />
+          <DashboardAvatar
+            role="worker"
+            name={profile.name}
+            photoUrl={profile.photoUrl}
+            onImageError={() => setProfile((current) => ({ ...current, photoUrl: null }))}
+          />
         </div>
       </header>
 
-      <section id="chats" className="mx-auto max-w-6xl space-y-5 px-4 py-5 sm:p-6">
+      <section className="mx-auto w-full max-w-6xl space-y-6 px-4 sm:px-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Minhas operações e candidaturas</h1>
           <p className="mt-1 text-sm text-gray-500">Confira sua confirmação e o próximo passo de cada trabalho.</p>
-          <Link href="/worker/invitations" className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Ver meus convites →</Link>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4">
+            <Link href="/worker/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800 hover:text-orange-950">← Voltar</Link>
+            <Link href="/worker/invitations" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Ver meus convites →</Link>
+          </div>
         </div>
         {operationsError && <p role="alert" className="rounded-xl bg-red-50 p-4 text-sm text-red-800">{operationsError}</p>}
         {reviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar experiência · {review.title}</Link>)}
@@ -133,46 +165,42 @@ export default function WorkerApplicationsPage() {
           <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
             Não foi possível carregar suas candidaturas: {errorMessage}
           </p>
-        ) : applications.length === 0 ? (
+        ) : visibleApplications.length === 0 ? (
           <EmptyState icon="◇" title="Sua próxima diária está à frente"
             description="Você ainda não se candidatou. Explore os plantões e encontre uma oportunidade para o seu perfil."
             action={<Link href="/worker/dashboard" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Explorar vagas</Link>} />
         ) : (
-          <div className="space-y-4">
-            {applications.map((application) => {
+          <div className="grid gap-4">
+            {visibleApplications.map((application) => {
               const operation = operations.find((item) => item.job_id === application.job_id);
               const window = application.job ? demandWindow(application.job) : null;
               const next = operation && window ? operationNextAction(operation, window.start, window.end, 'worker', clock) : null;
               const label = operation?.interruption ? operation.interruption === 'absent' ? 'Ausência confirmada' : operation.interruption === 'abandoned' ? 'Abandono registrado' : 'Cancelada'
                 : application.status === 'in_progress' && window && clock >= window.end ? 'Trabalho encerrado'
-                : application.status === 'approved' && window && clock < window.start ? 'Você está confirmado para esta demanda.'
+                : application.status === 'approved' && window && clock < window.start ? 'Você está confirmado para esta operação.'
                 : application.status === 'approved' ? 'Aguardando Check-in' : statusLabels[application.status] ?? application.status;
               return (
               <Card as="article" key={application.id} className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-lg font-bold text-gray-900">
-                    {application.job?.title ?? 'Vaga indisponível'}
+                    {application.job.title}
                   </h2>
                   <Badge tone={application.status === 'approved' ? 'success' : application.status === 'rejected' ? 'danger' : 'warning'}>
                     {label}
                   </Badge>
                 </div>
-                {application.job && (
-                  <>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500">
-                      <span>{application.job.restaurant?.name ?? 'Estabelecimento'}</span>
-                      <span>{application.job.job_date}</span>
-                      <span>{application.job.start_time} às {application.job.end_time}</span>
-                      <span className="font-semibold text-orange-600">
-                        R$ {Number(application.job.value).toFixed(2)}
-                      </span>
-                    </div>
-                  </>
-                )}
+                <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-gray-500">
+                  <span>{application.job.restaurant?.name ?? 'Estabelecimento'}</span>
+                  <span>{application.job.job_date}</span>
+                  <span>{application.job.start_time} às {application.job.end_time}</span>
+                  <span className="font-semibold text-orange-600">
+                    R$ {Number(application.job.value).toFixed(2)}
+                  </span>
+                </div>
                 {next && <Link href={next.href} className="ec-button ec-button--primary px-4">{next.label}</Link>}
                 <details className="border-t border-gray-100 pt-2">
-                  <summary className="cursor-pointer py-2 text-sm text-gray-600">Orientações e contato</summary>
-                  <p className="py-3 text-sm text-gray-600">{application.job?.description}</p>
+                  <summary className="cursor-pointer py-2 text-sm text-gray-600">Orientações</summary>
+                  <p className="py-3 text-sm text-gray-600">{application.job.description}</p>
                   {['approved', 'in_progress', 'completed'].includes(application.status) && <Link href={`/chat/${application.job_id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Conversar</Link>}
                 </details>
               </Card>
@@ -180,7 +208,7 @@ export default function WorkerApplicationsPage() {
           </div>
         )}
       </section>
-      <MobileBottomNav role="worker" />
+      <MobileBottomNav role="worker" showOnDesktop />
     </main>
   );
 }

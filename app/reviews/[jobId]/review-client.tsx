@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 interface ReviewContext {
   job_title: string;
@@ -127,7 +128,7 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
       <section className="mx-auto max-w-xl space-y-6">
         <header className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold text-emerald-700">ExtraChef</p>
+            <DashboardLogo role={currentRole} />
             <h1 className="mt-1 text-2xl font-bold text-gray-900">Avaliação da diária</h1>
           </div>
           <Link href={returnHref} className="text-sm font-medium text-gray-600 hover:text-emerald-700">

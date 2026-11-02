@@ -37,16 +37,16 @@ function DemandEditor({ demand, duplicate }: { demand: Demand; duplicate: boolea
         p_expected_revision: demand.job.demand_revision,
       });
       if (error) throw new Error(error.message);
-      if (typeof data !== 'string') throw new Error('O serviço não confirmou a demanda salva.');
+      if (typeof data !== 'string') throw new Error('O serviço não confirmou a operação salva.');
       router.push(`/restaurant/demands/${data}`);
       router.refresh();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Não foi possível salvar a demanda.');
+      setError(error instanceof Error ? error.message : 'Não foi possível salvar a operação.');
     } finally { setBusy(false); }
   };
   return (
     <form onSubmit={(event) => void save(event)} className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5">
-      <h2 className="text-xl font-semibold">{duplicate ? 'Duplicar demanda' : 'Editar demanda'}</h2>
+      <h2 className="text-xl font-semibold">{duplicate ? 'Duplicar operação' : 'Editar operação'}</h2>
       <p className="text-sm leading-6 text-gray-500">{duplicate ? 'Confira a data antes de publicar. O local e a quantidade serão copiados; a equipe e as candidaturas não.' : 'As alterações serão aplicadas a todos os profissionais necessários. O local e a quantidade serão mantidos.'}</p>
       {error && <Toast tone="error">{error}</Toast>}
       <fieldset disabled={busy} className="min-w-0 space-y-4">
@@ -57,9 +57,9 @@ function DemandEditor({ demand, duplicate }: { demand: Demand; duplicate: boolea
           <label className="block text-sm font-medium">Início<TextInput required type="time" value={start} onChange={(event) => setStart(event.target.value)} className="mt-1" /></label>
           <label className="block text-sm font-medium">Fim<TextInput required type="time" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-1" /></label>
         </div>
-        <label className="block text-sm font-medium">Diária por profissional (R$)<TextInput required type="number" min="0.01" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} className="mt-1" /></label>
+        <label className="block text-sm font-medium">Diária (R$)<TextInput required type="number" min="0.01" step="0.01" value={value} onChange={(event) => setValue(event.target.value)} className="mt-1" /></label>
         <div className="flex flex-wrap items-center gap-4">
-          <Button variant="primary" type="submit" busy={busy} className="px-5">{duplicate ? 'Publicar nova demanda' : 'Salvar alterações'}</Button>
+          <Button variant="primary" type="submit" busy={busy} className="px-5">{duplicate ? 'Publicar nova operação' : 'Salvar alterações'}</Button>
           <Link href={`/restaurant/demands/${demand.id}`} className="inline-flex min-h-11 items-center text-sm font-semibold">Voltar</Link>
         </div>
       </fieldset>
@@ -146,7 +146,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
         if (results[3].status === 'fulfilled') setPendingReviews(results[3].value.filter((review) => data.jobs.some((job) => job.id === review.job_id)));
         else setOperationsError('Não foi possível conferir as avaliações pendentes. Atualize a operação.');
       } catch (error) {
-        if (mounted) setError(error instanceof Error ? error.message : 'Não foi possível carregar a demanda.');
+        if (mounted) setError(error instanceof Error ? error.message : 'Não foi possível carregar a operação.');
       } finally { if (mounted) setLoading(false); }
     }
     void load();
@@ -209,29 +209,29 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
     try { setNotice(await shareDemand(demand)); }
     catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      setActionError('Não foi possível compartilhar a demanda. Confira as permissões do navegador.');
+      setActionError('Não foi possível compartilhar a operação. Confira as permissões do navegador.');
     }
   };
-  const heading = view === 'talents' ? 'Rede de Talentos' : view === 'candidates' ? 'Candidatos' : view === 'profile' ? 'Perfil do profissional' : demand?.job.title ?? 'Detalhe da Demanda';
+  const heading = view === 'talents' ? 'Rede de Talentos' : view === 'candidates' ? 'Candidatos' : view === 'profile' ? 'Perfil do profissional' : demand?.job.title ?? 'Detalhes da Operação';
   return (
     <main className="min-h-screen bg-[#fafaf9] px-5 py-6 pb-48 text-gray-950 sm:px-8">
       <section className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <Link href={view || action ? base : '/restaurant/demands'} className="inline-flex min-h-11 items-center text-xs font-semibold text-gray-600">← {view || action ? 'Voltar à demanda' : 'Voltar'}</Link>
+            <Link href={view || action ? base : '/restaurant/demands'} className="inline-flex min-h-11 items-center text-xs font-semibold text-gray-600">← {view || action ? 'Voltar à operação' : 'Voltar'}</Link>
             <h1 className="mt-2 break-words text-2xl font-semibold tracking-[-0.04em] sm:text-3xl">{heading}</h1>
           </div>
           {demand && !loading && <details className="relative z-20 mt-1">
-            <summary aria-label="Ações da demanda" className="grid size-11 cursor-pointer list-none place-items-center rounded-full border border-gray-200 bg-white text-xl">···</summary>
+            <summary aria-label="Ações da operação" className="grid size-11 cursor-pointer list-none place-items-center rounded-full border border-gray-200 bg-white text-xl">···</summary>
             <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
               <DemandActions demand={demand} detailed onChanged={() => setRetry((value) => value + 1)} />
-              {!demand.completed && !demand.cancelled && <p className="mt-3 text-xs leading-5 text-gray-500">Arquivar Demanda disponível após concluir ou cancelar.</p>}
+              {!demand.completed && !demand.cancelled && <p className="mt-3 text-xs leading-5 text-gray-500">Arquivar Operação disponível após concluir ou cancelar.</p>}
             </div>
           </details>}
         </header>
-        {loading ? <LoadingSkeleton label="Carregando demanda..." /> : error ? (
-          <Toast tone="error" title="Não foi possível carregar esta demanda."><p>{error}</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="mt-2 px-0 underline">Tentar Novamente</Button></Toast>
-        ) : !demand ? <EmptyState title="Demanda não encontrada." description="Ela pode não estar disponível para sua conta." /> : action === 'duplicate' || (action === 'edit' && demand.canEdit) ? (
+        {loading ? <LoadingSkeleton label="Carregando operação..." /> : error ? (
+          <Toast tone="error" title="Não foi possível carregar esta operação."><p>{error}</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="mt-2 px-0 underline">Tentar Novamente</Button></Toast>
+        ) : !demand ? <EmptyState title="Operação não encontrada." description="Ela pode não estar disponível para sua conta." /> : action === 'duplicate' || (action === 'edit' && demand.canEdit) ? (
           <DemandEditor key={`${demand.id}-${action}`} demand={demand} duplicate={action === 'duplicate'} />
         ) : view === 'talents' ? <DemandTalentNetwork demandId={demandId} /> : view === 'profile' ? (
           <section className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5">
@@ -251,16 +251,16 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
             {peopleError && <Toast tone="info">{peopleError}</Toast>}
             {actionError && <Toast tone="error">{actionError}</Toast>}
             {notice && <Toast tone="info">{notice}</Toast>}
-            {candidates.length ? candidates.map((candidate) => renderCandidate(candidate)) : <EmptyState title="Ainda não há candidatos." description="Compartilhe a demanda para encontrar ajuda."
-              action={<Button variant="primary" onClick={() => void share()} className="px-4">Compartilhar Demanda</Button>} />}
+            {candidates.length ? candidates.map((candidate) => renderCandidate(candidate)) : <EmptyState title="Ainda não há candidatos." description="Compartilhe a operação para encontrar ajuda."
+              action={<Button variant="primary" onClick={() => void share()} className="px-4">Compartilhar Operação</Button>} />}
           </section>
         ) : (
           <>
-            {action === 'edit' && <Toast tone="info">Esta demanda já possui candidaturas ou foi iniciada. Não é possível editar os dados combinados com a equipe.</Toast>}
-            {demand.archived && <Toast tone="info">Demanda arquivada. Você pode restaurá-la pelo menu de ações.</Toast>}
+            {action === 'edit' && <Toast tone="info">Esta operação já possui candidaturas ou foi iniciada. Não é possível editar os dados combinados com a equipe.</Toast>}
+            {demand.archived && <Toast tone="info">Operação arquivada. Você pode restaurá-la pelo menu de ações.</Toast>}
             <section aria-labelledby="summary-heading" className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 id="summary-heading" className="text-xs font-semibold uppercase tracking-widest text-gray-500">Informações da Demanda</h2>
+                <h2 id="summary-heading" className="text-xs font-semibold uppercase tracking-widest text-gray-500">Informações da Operação</h2>
                 <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${demand.health === 'risk' ? 'bg-red-50 text-red-800' : demand.health === 'safe' ? 'bg-emerald-50 text-emerald-800' : 'bg-orange-50 text-orange-900'}`}>{demand.status}</span>
               </div>
               <p className="break-words text-xl font-semibold">{demand.job.title}</p>
@@ -284,7 +284,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
                 <summary className="cursor-pointer py-2 text-sm font-medium text-gray-600">Outras ações</summary>
                 <div className="flex flex-wrap gap-3">
                   <Link href={`${base}?view=talents`} className="ec-button ec-button--secondary px-3 text-sm">Convidar Profissionais</Link>
-                  <Button onClick={() => void share()} className="px-3 text-sm">Compartilhar Demanda</Button>
+                  <Button onClick={() => void share()} className="px-3 text-sm">Compartilhar Operação</Button>
                   {demand.canEdit && <Link href={`${base}?action=edit`} className="inline-flex min-h-11 items-center text-sm font-semibold text-gray-600">Editar</Link>}
                   <Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="px-0 text-xs text-gray-500">Atualizar operação</Button>
                 </div>
@@ -297,7 +297,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
             <section id="team-heading" aria-labelledby="candidates-heading" className="scroll-mt-6 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="candidates-heading" className="text-xl font-semibold">Candidatos recentes</h2><Link href={`${base}?view=candidates`} className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">Ver todos ({candidates.length})</Link></div>
               {candidates.length ? candidates.slice(0, 3).map((candidate) => renderCandidate(candidate)) : <EmptyState title="Ainda não há candidatos." description="Divulgue sua operação para encontrar os profissionais certos."
-                action={<Button variant="primary" onClick={() => void share()} className="px-4">Compartilhar Demanda</Button>} />}
+                action={<Button variant="primary" onClick={() => void share()} className="px-4">Compartilhar Operação</Button>} />}
             </section>
             <section aria-labelledby="hired-heading" className="space-y-4">
               <h2 id="hired-heading" className="scroll-mt-6 text-xl font-semibold">Equipe contratada</h2>
@@ -350,18 +350,18 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
                   <p className="mt-1 text-sm font-medium">{eventLabels[event.kind] ?? 'Operação atualizada'}</p>
                   {event.worker_id && <p className="mt-0.5 text-xs text-gray-500">{personById.get(event.worker_id)?.name ?? 'Profissional'}</p>}
                 </li>)}
-              </ol> : <p className="text-sm text-gray-500">Nenhum evento registrado nesta demanda.</p>}
+              </ol> : <p className="text-sm text-gray-500">Nenhum evento registrado nesta operação.</p>}
               {events.length > eventLimit && <Button onClick={() => setEventLimit((value) => value + 20)} className="px-4 text-xs">Ver histórico completo</Button>}
             </section>
             <section aria-labelledby="location-heading" className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5">
               <h2 id="location-heading" className="text-xl font-semibold">Local</h2>
               <p className="font-medium">{demand.job.location_name || 'Local a definir'}</p>
               <p className="break-words text-sm leading-6 text-gray-500">{demandAddress(demand) || 'Endereço ainda não informado.'}</p>
-              {maps?.map && (mapAllowed ? <iframe title="Mapa do local da demanda" src={maps.map} loading="lazy" referrerPolicy="no-referrer" sandbox="allow-scripts" className="h-44 w-full rounded-xl border-0" /> : <div className="rounded-xl bg-gray-50 p-4"><p className="text-xs leading-5 text-gray-500">Carregar o mapa conecta seu navegador ao OpenStreetMap.</p><Button onClick={() => setMapAllowed(true)} className="mt-2 px-3 text-xs">Carregar mapa</Button></div>)}
+              {maps?.map && (mapAllowed ? <iframe title="Mapa do local da operação" src={maps.map} loading="lazy" referrerPolicy="no-referrer" sandbox="allow-scripts" className="h-44 w-full rounded-xl border-0" /> : <div className="rounded-xl bg-gray-50 p-4"><p className="text-xs leading-5 text-gray-500">Carregar o mapa conecta seu navegador ao OpenStreetMap.</p><Button onClick={() => setMapAllowed(true)} className="mt-2 px-3 text-xs">Carregar mapa</Button></div>)}
               {maps?.route && <a href={maps.route} target="_blank" rel="noopener noreferrer" className="ec-button ec-button--secondary px-4 text-sm">Abrir rota ↗</a>}
             </section>
             <section aria-labelledby="notes-heading" className="rounded-2xl border border-gray-200 bg-white p-5">
-              <h2 id="notes-heading" className="text-xl font-semibold">Observações</h2>
+              <h2 id="notes-heading" className="text-xl font-semibold">Detalhes</h2>
               <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-7 text-gray-600">{demand.job.description || 'Nenhuma orientação adicional.'}</p>
             </section>
           </>

@@ -12,7 +12,7 @@ test('restaurant messages stay operational, linked to approved jobs, and use the
 
   for (const text of [
     'Acompanhe suas operações e converse com profissionais já contratados.',
-    'Buscar profissionais, operações ou demandas...',
+    'Buscar profissionais ou operações...',
     'worker_name',
     'demand_title',
     'job_date',
@@ -23,7 +23,7 @@ test('restaurant messages stay operational, linked to approved jobs, and use the
   assert.ok(inboxData.includes('restaurant_operational_message_inbox'));
   assert.ok(inbox.includes('Nenhuma conversa disponível.'));
   assert.ok(inbox.includes('As mensagens serão criadas automaticamente após uma contratação.'));
-  assert.ok(inbox.includes('Ver Demandas'));
+  assert.ok(inbox.includes('Ver Operações'));
   assert.ok(inbox.includes('<Card as="article"'));
   assert.doesNotMatch(inbox, /Filtrar conversas|filterConversation|aria-pressed/);
   assert.doesNotMatch(inbox, /Nova mensagem|nova conversa/i);
@@ -33,7 +33,7 @@ test('restaurant messages stay operational, linked to approved jobs, and use the
     'get_approved_chat_context',
     'operational_context',
     'Ver Perfil',
-    'Ver Demanda',
+    'Ver Operação',
     'Ver Operação',
     'Profissional contratado.',
     'Check-in realizado. Operação iniciada.',
@@ -43,8 +43,8 @@ test('restaurant messages stay operational, linked to approved jobs, and use the
     'Operação encerrada.',
   ]) assert.ok(chat.includes(text), text);
   assert.match(inbox, /href=\{`\/chat\/\$\{conversation\.job_id\}`\}/);
-  for (const label of ['Home', 'Demandas', 'Talentos', 'Mensagens', 'Equipe', 'Mais']) assert.ok(navigation.includes(`label: '${label}'`), label);
-  const restaurantOrder = ['Home', 'Demandas', 'Talentos', 'Equipe', 'Mensagens', 'Mais'].map((label) => navigation.indexOf(`label: '${label}'`));
+  for (const label of ['Home', 'Operações', 'Talentos', 'Mensagens', 'Equipe', 'Mais']) assert.ok(navigation.includes(`label: '${label}'`), label);
+  const restaurantOrder = ['Home', 'Operações', 'Talentos', 'Equipe', 'Mensagens', 'Mais'].map((label) => navigation.indexOf(`label: '${label}'`));
   assert.deepEqual(restaurantOrder, [...restaurantOrder].sort((a, b) => a - b));
   assert.ok(navigation.includes("href: '/restaurant/messages'"));
   assert.doesNotMatch(navigation, /sidebar|menu lateral/i);

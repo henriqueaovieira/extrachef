@@ -1,19 +1,26 @@
 # Catalogo independente de locais
 
-## Escopo da Fase 1 e integracao aprovada na Fase 2
+## Estado atual: infraestrutura interna preservada
 
-Rota: `/restaurant/locations`, acessivel pelo link **Meus Locais** no dashboard
-do restaurante, inclusive em mobile. Usa App Router, cliente Supabase existente
-e componentes compartilhados Button, Card, Badge, MaskedInput, Select, Toast,
-EmptyState e LoadingSkeleton. Nao altera autenticacao ou os cinco itens da
-navegacao inferior.
+A interface **Meus Locais** foi removida. A antiga rota
+`/restaurant/locations` nao possui mais pagina. A interface da Agenda tambem
+foi descontinuada; nao ha links para gerenciar locais manualmente.
+
+A tabela `work_locations`, seus dados, indices, RLS e RPCs continuam intactos.
+Na remocao original de Meus Locais nenhuma migration foi necessaria.
+A descontinuacao posterior da Agenda adiciona
+[localizacao automatica de demandas](./agenda-retirement-report.md):
+o endereco principal do perfil e convertido em um local padrao na mesma
+transacao da publicacao, sem tela de cadastro e sem dependencia de eventos.
+As RPCs antigas e os snapshots de eventos permanecem disponiveis internamente.
+GPS, check-in, check-out, validacao de presenca e editor de perfil nao mudam.
 
 O catalogo nao le/grava events, jobs, applications, checkins ou checkouts.
 Nao altera as RPCs de presenca e nao depende de migrations dessas entidades.
 Nao existe GPS, chamada externa, mapa ou geocodificacao no catalogo.
-A [Fase 2 de eventos](./event-location-snapshots.md) agora prepara selecao e copia
-independente para eventos, em migration separada ainda nao executada.
-Vagas continuam fora desta integracao.
+A [Fase 2 de eventos](./event-location-snapshots.md) documenta o contrato
+historico de copia independente para eventos. Demandas novas usam o mesmo
+catalogo por meio da origem restaurant, resolvida internamente para catalog.
 
 A proposta operacional anterior foi suspensa e movida para
 `supabase/proposals/20261015050000_operational_locations.sql`. Nao aplicar.
@@ -36,9 +43,9 @@ concluido nesta entrega; nao deve ser confundido com requisito do catalogo.
   protegendo contra sobrescrita por outra aba. Conflito exige atualizar a lista
   e reabrir o formulario; nao sobrescreve automaticamente.
 
-Todos os cadastros novos comecam com coordenadas nulas e estado pending. A tela
-explica essa pendencia sem tratar o cadastro como falha. A fase atual nao tenta
-resolver coordenadas nem permite ao navegador forcar estado resolved.
+Todos os cadastros novos pelas RPCs comecam com coordenadas nulas e estado
+pending. Nao ha mais interface de cadastro manual. A infraestrutura do catalogo
+nao tenta resolver coordenadas nem permite ao navegador forcar estado resolved.
 
 Editar somente o nome preserva coordenadas existentes. Alterar endereco, numero,
 bairro, cidade, UF ou CEP invalida coordenadas e metadados, muda para pending
@@ -61,8 +68,8 @@ privilegiadas diretas futuras devem respeitar o mesmo protocolo de revisao.
 - Indice unico parcial garante no maximo um padrao ativo por restaurante,
   inclusive contra gravacoes privilegiadas inconsistentes.
 - Arquivar remove o padrao. Restaurar nao escolhe novo padrao nem retoma o antigo.
-- Nao ha padrao escolhido silenciosamente: o usuario usa Definir como padrao.
-- Exclusao definitiva exige arquivamento previo e confirmacao na interface.
+- Nao ha padrao escolhido silenciosamente: a RPC exige a acao set_default.
+- Exclusao definitiva pela RPC exige arquivamento previo.
   A migration separada da Fase 2 adiciona FK que bloqueia exclusao de locais
   referenciados por eventos; arquivamento continua permitido e preserva snapshots.
 - Nenhum papel admin e criado. Exclusao da conta em users faz cascade do catalogo.
@@ -94,8 +101,7 @@ nao reverte o schema confirmado. Nao e uma migration idempotente.
 - [ ] Confirmar users.id UUID, role e permissao de leitura do proprio papel.
 - [ ] Garantir que a proposta suspensa esta fora das migrations executaveis.
 - [ ] Ensaiar somente esta migration em staging.
-- [ ] Publicar banco antes de habilitar a tela; sem a tabela, a UI exibe erro,
-      nao uma falsa lista vazia.
+- [ ] Preservar a infraestrutura interna; nao reabilitar a interface removida.
 - [ ] Nao usar db push indiscriminado para aplicar outras migrations pendentes.
 
 Consultas abaixo sao para execucao futura autorizada:
@@ -131,26 +137,16 @@ GROUP BY restaurant_id HAVING count(*) > 1;
 A ultima consulta nao deve retornar linhas. Testar RLS com JWTs de usuarios
 reais de staging, nao apenas SQL Editor privilegiado.
 
-## Checklist funcional
+## Checklist da remocao da interface
 
-- [ ] Meus Locais abre pelo dashboard em desktop e mobile.
-- [ ] Restaurante cria local sem CEP, coordenadas ou servico externo.
-- [ ] Nome/endereco/cidade/UF invalidos sao rejeitados.
-- [ ] Listar/buscar/filtrar ativos, arquivados e todos funciona.
-- [ ] Editar e recarregar preserva os dados salvos.
-- [ ] Primeiro padrao e troca de padrao deixam somente um ativo.
-- [ ] Remover padrao deixa zero; nao seleciona outro automaticamente.
-- [ ] Arquivar padrao mostra confirmacao e remove a condicao de padrao.
-- [ ] Restaurar nao recupera padrao automaticamente.
-- [ ] Excluir exige arquivamento e confirmacao; cancelar preserva registro.
-- [ ] Conflito entre abas nao sobrescreve uma revisao mais recente.
-- [ ] Duplo clique nao dispara duas mutacoes simultaneas.
-- [ ] Falha de leitura aparece como erro com opcao de atualizar.
-- [ ] Gravacao bem-sucedida seguida de falha na leitura e informada como salva,
-      sem oferecer reenviar o formulario.
-- [ ] Outro restaurante e trabalhador nao leem/alteram o catalogo alheio.
-- [ ] Sem sessao/anon nao grava e nao consulta.
-- [ ] Nenhuma operacao altera eventos, vagas ou presenca.
+- [ ] Mais nao oferece Meus Locais em desktop ou mobile.
+- [ ] Acesso direto a antiga rota nao renderiza a tela removida.
+- [ ] Agenda e Meus Locais nao possuem mais pagina ou atalhos.
+- [ ] Publicar demanda cria/reutiliza o local do endereco principal do perfil.
+- [ ] Perfil sem endereco valido impede publicacao com erro explicito.
+- [ ] Mudancas de endereco nao alteram snapshots de demandas/eventos antigos.
+- [ ] Testes SQL continuam validando RLS, RPCs, revisoes e coordenadas.
+- [ ] Nenhuma tabela, API de GPS/presenca ou regra de edicao de perfil foi removida.
 
 ## Testes
 
@@ -177,12 +173,7 @@ Supabase staging, especialmente para RLS/JWTs, concorrencia e schema real.
 
 ## Rollback
 
-Antes do COMMIT, falha reverte a transacao inteira. Apos COMMIT, desabilitar
-o acesso a tela e preservar a tabela e os locais cadastrados e a reversao mais
-segura. O restante do sistema nao depende desta tabela.
-
-Se for indispensavel remover o schema, primeiro exportar os dados, verificar
-dependencias reais e ausencia de integracoes futuras, depois remover funcoes
-e tabela em uma reversao revisada/autorizada. Remover a tabela destroi catalogo,
-padroes e dados de resolucao. Nao usar CASCADE indiscriminado nem remover users.
-Nenhum dado de jobs/events/checkins/checkouts precisa ser revertido por esta fase.
+A remocao atual e exclusivamente de frontend. Para reverte-la, restaurar
+somente a pagina, o componente e os acessos removidos, com seus testes.
+Nao apagar `work_locations`, seus dados ou RPCs e nao executar reversao de
+schema: a infraestrutura permanece para GPS, presenca e integracoes existentes.

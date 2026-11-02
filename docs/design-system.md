@@ -127,7 +127,7 @@ No editor ele acompanha dados ainda nao salvos; no resumo ele usa dados carregad
 
 - [Login](../app/login/page.tsx), [Cadastro](../app/register/page.tsx), [Perfil generico](../app/profile/page.tsx).
 - [Editor de perfil](../app/components/profile-editor.tsx), [Resumo de perfil](../app/components/profile-overview.tsx), [Camera](../app/components/camera-capture.tsx), [Logout](../app/components/logout-button.tsx).
-- [Eventos](../app/components/restaurant-events.tsx), [Criar vaga](../app/restaurant/dashboard/jobs/create/page.tsx), [Dashboard restaurante](../app/restaurant/dashboard/page.tsx).
+- [Criar demanda](../app/restaurant/dashboard/jobs/create/page.tsx), [Dashboard restaurante](../app/restaurant/dashboard/page.tsx). A antiga interface de Eventos foi posteriormente descontinuada.
 - [Candidatos](../app/restaurant/candidates/page.tsx), [Dashboard worker](../app/worker/dashboard/page.tsx), [Candidaturas](../app/worker/applications/page.tsx).
 - [Chat](../app/chat/[jobId]/chat-client.tsx), [Fallback chat](../app/chat/[jobId]/page.tsx).
 - [Check-in](../app/checkin/[jobId]/checkin-client.tsx), [Fallback check-in](../app/checkin/[jobId]/page.tsx).

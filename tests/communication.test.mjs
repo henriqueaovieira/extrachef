@@ -484,9 +484,10 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
   const React = require('react');
   const { renderToStaticMarkup } = require('react-dom/server');
   let counts = { messages: 0, notifications: 0 };
+  let pathname = '/notifications';
   const dependencies = {
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
-    'next/navigation': { usePathname: () => '/notifications' },
+    'next/navigation': { usePathname: () => pathname },
     '@/app/components/communication-state': { useCommunication: () => ({ counts, error: '' }) },
   };
   const { default: Nav } = loadTs('../app/components/mobile-bottom-nav.tsx', dependencies);
@@ -499,13 +500,34 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
   }
   counts = { messages: 3, notifications: 125 };
   const workerMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'worker' }));
-  assert.match(workerMarkup, /aria-label="Chat: 3 não lidas"/);
-  assert.match(workerMarkup, /aria-label="Avisos: 125 não lidas"/);
-  assert.match(workerMarkup, /99\+/);
+  assert.match(workerMarkup, /aria-label="Mensagens: 3 não lidas"/);
+  assert.doesNotMatch(workerMarkup, /Avisos/);
+  for (const label of ['Home', 'Minhas Candidaturas', 'Mensagens', 'Mais']) assert.match(workerMarkup, new RegExp(`>${label}<`));
+  assert.equal((workerMarkup.match(/href=/g) ?? []).length, 4);
+  assert.equal((workerMarkup.match(/aria-current="page"/g) ?? []).length, 1);
+  assert.doesNotMatch(workerMarkup, /125|99\+/);
   const restaurantMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'restaurant' }));
   assert.match(restaurantMarkup, /aria-label="Mensagens: 3 não lidas"/);
   assert.doesNotMatch(restaurantMarkup, /Avisos: 125/);
-  assert.match(renderToStaticMarkup(React.createElement(Bell)), /Notificações: 125 não lidas/);
+  const bellMarkup = renderToStaticMarkup(React.createElement(Bell));
+  assert.match(bellMarkup, /Notificações: 125 não lidas/);
+  assert.match(bellMarkup, /99\+/);
+
+  for (const [path, activeLabel] of [
+    ['/worker/dashboard', 'Home'],
+    ['/worker/applications', 'Minhas Candidaturas'],
+    ['/worker/messages', 'Mensagens'],
+    ['/chat/job-1', 'Mensagens'],
+    ['/worker/profile', 'Mais'],
+  ]) {
+    pathname = path;
+    const markup = renderToStaticMarkup(React.createElement(Nav, { role: 'worker' }));
+    assert.match(markup, new RegExp(`aria-current="page" aria-label="${activeLabel}(?:"|:)`), path);
+    assert.equal((markup.match(/aria-current="page"/g) ?? []).length, 1, path);
+  }
+  const navigationSource = source('../app/components/mobile-bottom-nav.tsx');
+  assert.match(navigationSource, /href: '\/worker\/messages', label: 'Mensagens'/);
+  assert.doesNotMatch(navigationSource, /worker\/applications#chats/);
 });
 
 test('center scopes every query/mutation away from message notifications and uses shared exact count', () => {

@@ -53,7 +53,7 @@ export interface OperationalReputation {
 }
 
 export const phaseLabels: Record<string, string> = {
-  confirmed: 'Você está confirmado para esta demanda.',
+  confirmed: 'Você está confirmado para esta operação.',
   checkin: 'Aguardando Check-in',
   absence_pending: 'Aguardando confirmação de ausência',
   working: 'Trabalho em andamento',

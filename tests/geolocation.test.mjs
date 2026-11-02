@@ -17,9 +17,36 @@ function load(file, dependencies = {}) {
   return exports;
 }
 const geo = load('../lib/work-location.ts');
+const device = load('../lib/geolocation.ts');
 const address = () => ({
   ...geo.emptyWorkLocation, address: 'Rua das Flores', number: '120', neighborhood: 'Centro',
   city: 'Piracicaba', state: 'SP', postal_code: '13400-000', location_name: 'Casamento Silva',
+});
+
+test('device GPS is a fresh one-shot request and reports permission, timeout and availability errors', async (t) => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const navigator = {};
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: navigator });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'navigator', previous);
+    else delete globalThis.navigator;
+  });
+  await assert.rejects(device.getDeviceCoordinates(), /não oferece acesso/);
+  let requests = 0;
+  navigator.geolocation = {
+    getCurrentPosition(success, failure, options) {
+      requests++;
+      assert.deepEqual(options, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+      success({ coords: { latitude: -23.5, longitude: -46.6, accuracy: 10 } });
+    },
+  };
+  assert.deepEqual(await device.getDeviceCoordinates(), { latitude: -23.5, longitude: -46.6, accuracy: 10 });
+  assert.equal(requests, 1);
+  for (const [code, message] of [[1, /Permita o acesso/], [2, /Verifique o GPS/], [3, /a tempo/]]) {
+    navigator.geolocation.getCurrentPosition = (success, failure) =>
+      failure({ code, PERMISSION_DENIED: 1, TIMEOUT: 3 });
+    await assert.rejects(device.getDeviceCoordinates(), message);
+  }
 });
 
 test('coordinate validation rejects null, NaN, infinity and out-of-range values', () => {
@@ -46,6 +73,7 @@ test('Haversine measures the actual geofence thresholds and antipodes', () => {
 test('address validation and serializers preserve distinct job and event fields', () => {
   const location = { ...address(), latitude: -22.7, longitude: -47.6 };
   assert.doesNotThrow(() => geo.validateWorkAddress(location));
+  assert.doesNotThrow(() => geo.validateWorkAddress({ ...location, postal_code: '' }));
   assert.throws(() => geo.validateWorkAddress({ ...location, city: '' }), /cidade/);
   assert.throws(() => geo.validateWorkAddress({ ...location, postal_code: '123' }), /CEP/);
   assert.throws(() => geo.validateWorkAddress({ ...location, state: 'sp' }), /UF/);
@@ -151,6 +179,10 @@ test('geocoder uses server-only endpoint/key and validates provider response', a
   assert.equal(response.status, 200);
   assert.match(response.headers.get('Cache-Control'), /no-store/);
   assert.deepEqual(await response.json(), { latitude: -22, longitude: -47 });
+  assert.equal((await route()(request({
+    address: 'Rua das Flores', number: '120', city: 'Piracicaba', state: 'SP',
+    location_name: 'Operação', neighborhood: '',
+  }))).status, 200);
   fetch.mock.mockImplementation(async () => Response.json({ latitude: '0', longitude: '0' }));
   assert.equal((await route()(request())).status, 502);
   fetch.mock.mockImplementation(async () => new Response('', { status: 429 }));
@@ -163,9 +195,12 @@ test('geocoder uses server-only endpoint/key and validates provider response', a
 test('job creation no longer captures publisher GPS and worker applications have no GPS gate', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.doesNotMatch(create, /getDeviceCoordinates|navigator\.geolocation/);
+  assert.match(create, /resolveWorkLocation/);
+  assert.match(create, /rpc\('save_geocoded_work_location'/);
   assert.match(create, /rpc\('create_restaurant_demand'/);
-  assert.match(create, /p_location_source: selectedEvent \? 'event' : 'none'/);
-  assert.doesNotMatch(create, /p_latitude|p_longitude|resolveWorkLocation/);
+  assert.match(create, /p_location_source: 'catalog'/);
+  assert.match(create, /p_latitude: location\.latitude/);
+  assert.match(create, /p_longitude: location\.longitude/);
   const worker = source('../app/worker/dashboard/page.tsx');
   const application = worker.slice(worker.indexOf('const handleApply'), worker.indexOf('const shareJob'));
   assert.match(application, /from\('applications'\)\.insert/);

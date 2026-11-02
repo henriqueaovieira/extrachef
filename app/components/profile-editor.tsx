@@ -8,6 +8,7 @@ import CameraCapture from '@/app/components/camera-capture';
 import { isValidCnpj, isValidCpf, normalizeDocument } from '@/lib/validations/br-documents';
 import ProfileProgress from '@/app/components/profile-progress';
 import { getProfileProgress } from '@/lib/ui/profile-progress';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -348,10 +349,10 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       <section className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
+            <DashboardLogo role={role} />
             <h1 className="mt-1 text-2xl font-bold text-gray-950">Editar perfil</h1>
           </div>
-          <Link href={role === 'worker' ? '/worker/profile' : '/restaurant/profile'} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Cancelar</Link>
+          <Link href={role === 'worker' ? '/worker/profile/details' : '/restaurant/profile'} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Cancelar</Link>
         </header>
 
         {errorMessage && <Toast tone="error">{errorMessage}</Toast>}

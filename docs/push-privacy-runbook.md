@@ -2,6 +2,8 @@
 
 ## Diagnóstico e limites
 
+Para investigar especificamente HTTP 503 em `/api/push/status`, consulte o [diagnostico de configuracao e checklist Vercel](./push-status-diagnosis.md), incluindo o inventario completo de variaveis e os novos eventos de log.
+
 O fluxo `messages -> notifications` está confirmado pelo relato do operador. O ponto exato da quebra em produção depende dos logs da Vercel, configuração do webhook e subscriptions do destinatário; não pode ser determinado apenas pelo código local.
 
 O repositório já continha central, preferências de categorias, badges independentes, popup de mensagem, resposta rápida e recibo HMAC no Service Worker. Estes componentes foram preservados. A central mantém mensagens no Chat para não duplicar contagens; há acesso visível a Mensagens na central.
@@ -57,6 +59,8 @@ PUSH_WEBHOOK_SECRET=
 ```
 
 `WEB_PUSH_VAPID_PUBLIC_KEY` é opcional no servidor; se configurada, precisa ser igual a `NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY`. As chaves públicas devem pertencer ao mesmo par da privada. Alterar VAPID exige reinscrever dispositivos existentes; não regenerar chaves a cada deploy.
+
+O admin aceita `SUPABASE_SECRET_KEY` como alternativa server-only a `SUPABASE_SERVICE_ROLE_KEY`, e `SUPABASE_URL` se a URL publica estiver ausente/vazia. Prefira os nomes acima e mantenha ambos os clientes no mesmo projeto. `VAPID_PUBLIC_KEY` nao e consumida; a publica do navegador precisa existir antes do build. O status inclui `browserVapidPublicKey` e so indica configuracao completa quando ela tambem esta presente.
 
 Geração de chaves (execute localmente, guarde a saída fora de logs compartilhados):
 

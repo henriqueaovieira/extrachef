@@ -54,7 +54,7 @@ export function DemandActions({ demand, onChanged, detailed = false }: { demand:
       if (error) throw new Error(error.message);
       onChanged();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Não foi possível arquivar a demanda.');
+      setError(error instanceof Error ? error.message : 'Não foi possível arquivar a operação.');
     } finally { setBusy(false); }
   };
   const cancel = async () => {
@@ -66,23 +66,23 @@ export function DemandActions({ demand, onChanged, detailed = false }: { demand:
       setConfirmCancel(false);
       onChanged();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'Não foi possível cancelar a demanda.');
+      setError(error instanceof Error ? error.message : 'Não foi possível cancelar a operação.');
     } finally { setBusy(false); }
   };
   return (
     <div className="relative z-10 space-y-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-gray-600">
-        {demand.canEdit ? <Link href={`${href}?action=edit`} className="inline-flex min-h-11 items-center">{detailed ? 'Editar Demanda' : 'Editar'}</Link> : detailed ? <p className="text-xs font-normal leading-5">Edição indisponível após candidaturas ou início da operação.</p> : null}
-        <Link href={`${href}?action=duplicate`} className="inline-flex min-h-11 items-center">{detailed ? 'Duplicar Demanda' : 'Duplicar'}</Link>
-        <Button variant="ghost" onClick={() => void share()} className="min-h-11 px-0 text-xs">{detailed ? 'Compartilhar Demanda' : 'Compartilhar'}</Button>
-        {demand.canCancel ? <Button variant="ghost" onClick={() => setConfirmCancel(true)} className="min-h-11 px-0 text-xs text-red-700">{detailed ? 'Cancelar Demanda' : 'Cancelar'}</Button> : detailed && demand.active ? <p className="text-xs font-normal leading-5">Cancelamento direto indisponível com profissionais contratados.</p> : null}
-        {(demand.completed || demand.cancelled || demand.archived) && <Button variant="ghost" disabled={busy} onClick={() => void archive()} className="min-h-11 px-0 text-xs">{demand.archived ? 'Restaurar Demanda' : 'Arquivar Demanda'}</Button>}
+        {demand.canEdit ? <Link href={`${href}?action=edit`} className="inline-flex min-h-11 items-center">{detailed ? 'Editar Operação' : 'Editar'}</Link> : detailed ? <p className="text-xs font-normal leading-5">Edição indisponível após candidaturas ou início da operação.</p> : null}
+        <Link href={`${href}?action=duplicate`} className="inline-flex min-h-11 items-center">{detailed ? 'Duplicar Operação' : 'Duplicar'}</Link>
+        <Button variant="ghost" onClick={() => void share()} className="min-h-11 px-0 text-xs">{detailed ? 'Compartilhar Operação' : 'Compartilhar'}</Button>
+        {demand.canCancel ? <Button variant="ghost" onClick={() => setConfirmCancel(true)} className="min-h-11 px-0 text-xs text-red-700">{detailed ? 'Cancelar Operação' : 'Cancelar'}</Button> : detailed && demand.active ? <p className="text-xs font-normal leading-5">Cancelamento direto indisponível com profissionais contratados.</p> : null}
+        {(demand.completed || demand.cancelled || demand.archived) && <Button variant="ghost" disabled={busy} onClick={() => void archive()} className="min-h-11 px-0 text-xs">{demand.archived ? 'Restaurar Operação' : 'Arquivar Operação'}</Button>}
       </div>
       {confirmCancel && <div className="rounded-xl border border-red-100 bg-red-50 p-3">
-        <p className="text-sm text-red-900">Cancelar esta demanda? As candidaturas deixarão de aceitar contratações.</p>
+        <p className="text-sm text-red-900">Cancelar esta operação? As candidaturas deixarão de aceitar contratações.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="danger" busy={busy} onClick={() => void cancel()} className="px-3 text-xs">Confirmar cancelamento</Button>
-          <Button disabled={busy} onClick={() => setConfirmCancel(false)} className="px-3 text-xs">Manter demanda</Button>
+          <Button disabled={busy} onClick={() => setConfirmCancel(false)} className="px-3 text-xs">Manter operação</Button>
         </div>
       </div>}
       {error && <Toast tone="error">{error}</Toast>}
@@ -107,7 +107,7 @@ export default function DemandCard({ demand, onChanged }: { demand: Demand; onCh
       </div>
       <DemandSituation demand={demand} />
       <div className="relative z-10 mt-auto flex flex-wrap items-center justify-between gap-2">
-        <Link href={`/restaurant/demands/${demand.id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-gray-900">Ver Detalhes <span aria-hidden="true" className="ml-2">→</span></Link>
+        <Link href={`/restaurant/demands/${demand.id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-gray-900">Ver Detalhes da Operação <span aria-hidden="true" className="ml-2">→</span></Link>
         {demand.active && <Link href={`/restaurant/demands/${demand.id}#team-heading`} className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">{demand.candidates ? 'Analisar candidatos' : demand.hired < demand.required ? 'Preencher equipe' : 'Ver equipe'}</Link>}
       </div>
       <details className="relative z-10 border-t border-gray-100 pt-1">

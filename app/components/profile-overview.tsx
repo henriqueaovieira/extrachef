@@ -11,6 +11,7 @@ import LogoutButton from '@/app/components/logout-button';
 import ProfileProgress from '@/app/components/profile-progress';
 import { getProfileProgress } from '@/lib/ui/profile-progress';
 import OperationalReputationView from '@/app/components/operational-reputation';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -152,18 +153,19 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
   }, [role, supabase]);
 
   const editHref = role === 'worker' ? '/worker/profile/edit' : '/restaurant/profile/edit';
-  const dashboardHref = role === 'worker' ? '/worker/dashboard' : '/restaurant/dashboard';
-
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28 sm:px-6 sm:py-10 md:pb-10">
       <section className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-center justify-between gap-3">
           <div>
-            {role === 'restaurant' && <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>}
-            <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
-            <h1 className="mt-1 text-2xl font-bold text-gray-950">Perfil</h1>
+            <DashboardLogo role={role} />
+            <h1 className="mt-1 text-2xl font-bold text-gray-950">Meu Perfil</h1>
           </div>
-          {role === 'worker' && <Link href={dashboardHref} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Início</Link>}
+          {role === 'restaurant' ? (
+            <Link href="/restaurant/more" className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">← Mais</Link>
+          ) : (
+            <Link href="/worker/profile" className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">← Mais</Link>
+          )}
         </header>
 
         {!loading && !errorMessage && progress && <ProfileProgress progress={progress} />}
@@ -216,7 +218,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
         )}
         {profile && (
           <>
-            {role === 'worker' && <OperationalReputationView />}
+            {role === 'worker' && <div id="confidence"><OperationalReputationView /></div>}
             <PushNotificationControl />
             <Link href="/settings/privacy" className="flex min-h-12 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">
               Preferências de notificações e privacidade

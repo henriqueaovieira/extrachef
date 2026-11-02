@@ -167,7 +167,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
             supabase.from('operational_assignments').select('hired_at, checkin_at, paid_at, receipt_confirmed_at, payment_disputed_at, checkout_at, interruption, interrupted_at').eq('job_id', jobId).maybeSingle(),
           ]);
           if (jobResult.error || applicationResult.error) {
-            if (isMounted) setOperationError('Não foi possível carregar o contexto da demanda.');
+            if (isMounted) setOperationError('Não foi possível carregar o contexto da operação.');
           } else if (jobResult.data && applicationResult.data) {
             const job = jobResult.data;
             const workerId = applicationResult.data.worker_id;
@@ -401,7 +401,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
         {restaurantChat && <section aria-label="Contexto da operação" className="space-y-3 border-b border-gray-200 bg-white px-4 py-3 sm:px-6">
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div><h2 className="font-semibold text-gray-900">{operation ? context?.job_title : 'Carregando demanda...'}</h2>
+              <div><h2 className="font-semibold text-gray-900">{operation ? context?.job_title : 'Carregando operação...'}</h2>
                 {operation && <p className="mt-1 text-xs text-gray-600">{formatOperationDate(operation.job_date)} · {operation.start_time.slice(0, 5)} às {operation.end_time.slice(0, 5)}</p>}
               </div>
               <Badge tone={operationStatusTone(operationalStatus)}>{operationalStatus}</Badge>
@@ -411,7 +411,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
           </div>
           {operation && <div className="flex flex-wrap gap-2">
             <Link href={`/restaurant/demands/${operation.demand_id}?view=profile&person=${operation.worker_id}`} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Perfil</Link>
-            <Link href={`/restaurant/demands/${operation.demand_id}`} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Demanda</Link>
+            <Link href={`/restaurant/demands/${operation.demand_id}`} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Operação</Link>
             <Link href={operation.operationHref} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Operação</Link>
           </div>}
         </section>}

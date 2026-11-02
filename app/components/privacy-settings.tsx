@@ -1,12 +1,13 @@
 'use client';
 
-import Link from 'next/link';
 import { Button, LoadingSkeleton, TextInput, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import AccountRights from '@/app/components/account-rights';
 import DevicePermissions from '@/app/components/device-permissions';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 interface Preferences {
   messages_enabled: boolean;
@@ -103,11 +104,17 @@ export default function PrivacySettings() {
   return (
     <main className="min-h-dvh bg-gray-50 px-4 py-6 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-10 md:pb-10">
       <section className="mx-auto max-w-2xl space-y-5">
-        <header>
-          {role === 'restaurant' && <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>}
-          <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
-          <h1 className="mt-1 text-2xl font-bold text-gray-950">Privacidade e notificações</h1>
-          <p className="mt-2 text-sm leading-6 text-gray-600">Escolha quais avisos deseja receber. A permissão do navegador para Push é configurada separadamente no Perfil.</p>
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <DashboardLogo role={role ?? undefined} />
+            <h1 className="mt-1 text-2xl font-bold text-gray-950">Privacidade e notificações</h1>
+            <p className="mt-2 text-sm leading-6 text-gray-600">Escolha quais avisos deseja receber. A permissão do navegador para Push é configurada separadamente no Perfil.</p>
+          </div>
+          {role === 'restaurant' ? (
+            <Link href="/restaurant/more" className="inline-flex min-h-12 shrink-0 items-center text-sm font-semibold text-orange-700">← Mais</Link>
+          ) : (
+            <Link href="/worker/profile" className="inline-flex min-h-12 shrink-0 items-center text-sm font-semibold text-orange-700">← Mais</Link>
+          )}
         </header>
 
         {loading ? (

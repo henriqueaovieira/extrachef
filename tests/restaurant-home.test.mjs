@@ -25,13 +25,19 @@ const ui = loadTs('../app/components/ui/index.tsx', {
 });
 const job = (id, extra = {}) => ({
   id, title: `Demanda ${id}`, job_date: '2099-10-17', start_time: '18:00:00',
-  end_time: '23:00:00', status: 'open', restaurant_id: 'restaurant',
-  location_name: 'Bella Napoli', work_address: 'Rua Central', work_city: 'São Paulo', ...extra,
+  end_time: '23:00:00', status: 'open', restaurant_id: 'restaurant', value: 150,
+  location_name: 'Bella Napoli', work_address: 'Rua Central', work_number: '123',
+  work_city: 'São Paulo', work_state: 'SP', ...extra,
 });
 const message = (id, jobId, extra = {}) => ({
   id, job_id: jobId, sender_id: 'worker-a', content: `Mensagem ${id}`,
   created_at: `2026-10-17T10:${id.padStart(2, '0')}:00Z`, read_at: null, ...extra,
 });
+const dateOffset = days => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 
 test('next demand excludes ended and closed shifts, sorts without mutating and includes overnight work', () => {
   const now = new Date('2026-10-17T01:00:00-03:00');
@@ -67,7 +73,7 @@ function database() {
     public_user_directory: [
       { id: 'restaurant', name: 'Henrique Vieira' }, { id: 'worker-a', name: 'Ana Silva' }, { id: 'worker-b', name: 'Bruno Costa' },
     ],
-    restaurant_profiles: [{ user_id: 'restaurant', logo_path: 'logo.png' }],
+    restaurant_profiles: [{ user_id: 'restaurant', logo_path: 'logo.png', trade_name: 'Bella Napoli' }],
     operational_assignments: [],
     pending_reviews: [],
     inboxJobs: ['a', 'b', 'c', 'd'],
@@ -135,6 +141,10 @@ function mount(db) {
   };
   const Nav = loadTs('../app/components/mobile-bottom-nav.tsx', shared).default;
   const Bell = loadTs('../app/components/notification-bell.tsx', shared).default;
+  const identity = loadTs('../app/components/dashboard-identity.tsx', {
+    ...shared,
+    'next/image': { default: ({ src, alt, sizes, className }) => React.createElement('img', { src, alt, sizes, className }) },
+  });
   const Component = loadTs('../app/restaurant/dashboard/page.tsx', {
     ...shared,
     react: {
@@ -173,6 +183,7 @@ function mount(db) {
     '@/app/components/ui': ui,
     '@/app/components/mobile-bottom-nav': { default: Nav },
     '@/app/components/notification-bell': { default: Bell },
+    '@/app/components/dashboard-identity': identity,
     '@/app/components/route-feedback': { default: () => null },
   }).default;
   function render() {
@@ -206,29 +217,52 @@ function mount(db) {
   };
 }
 
-test('operational home shows active/future demands, real actions and at most three conversations', async () => {
+test('home follows the approved order and shows only the three specified summary cards', async () => {
   const app = mount(database());
   try {
     await app.flush();
     const html = app.html();
-    assert.match(html, /Henrique/);
-    assert.match(html, /Foto do seu perfil/);
-    assert.match(html, /Sua operação de hoje/);
+    assert.match(html, /Bem-vindo 👋/);
+    assert.match(html, /Bella Napoli/);
+    assert.match(html, /Central Operacional do seu restaurante/);
+    const approvedOrder = [
+      'aria-label="ExtraChef — Home"',
+      'href="/notifications"',
+      'aria-label="Meu perfil"',
+      'Bem-vindo 👋',
+      'Bella Napoli',
+      'Central Operacional do seu restaurante',
+      'aria-label="Resumo operacional"',
+      'id="pending-heading"',
+      'id="operations-heading"',
+      'id="conversations-heading"',
+      'href="/restaurant/dashboard/jobs/create"',
+      'aria-label="Navegação principal"',
+    ].map(marker => html.indexOf(marker));
+    assert.ok(approvedOrder.every(index => index >= 0));
+    assert.deepEqual(approvedOrder, [...approvedOrder].sort((a, b) => a - b));
+    assert.doesNotMatch(html, /Bom dia|Boa tarde|Boa noite|Sua operação de hoje/);
     assert.match(html, /Ações pendentes/);
     assert.match(html, /Analisar e contratar/);
     assert.match(html, /Responder/);
     assert.match(html, /Equipe incompleta/);
-    assert.match(html, /Demandas ativas/);
-    assert.match(html, /Demandas futuras/);
-    assert.match(html, /Próxima ação necessária/);
-    assert.doesNotMatch(html, /Resumo operacional|posições preenchidas|Acessos rápidos|Conversas importantes/);
+    assert.match(html, /Operações/);
+    assert.doesNotMatch(html, /Operações ativas|Operações futuras|Próxima ação necessária/);
+    assert.match(html, /Operações em andamento/);
+    assert.match(html, /Próximas operações/);
+    assert.match(html, /Mensagens não lidas/);
+    assert.equal((html.match(/Operações em andamento|Próximas operações|Mensagens não lidas/g) ?? []).length, 3);
+    assert.doesNotMatch(html, /Receita|Faturamento|Avaliações|Conversões/);
+    assert.doesNotMatch(html, /posições preenchidas|Acessos rápidos|Conversas importantes/);
     assert.equal(app.elements().filter(item => item.props?.id === 'next-demand').length, 0);
     const recentSection = app.elements().find(item => item.props?.['aria-labelledby'] === 'conversations-heading');
     const recentHtml = renderToStaticMarkup(recentSection);
     assert.equal((recentHtml.match(/href="\/chat\//g) ?? []).length, 3);
     assert.match(recentHtml, /Mensagem 05/);
     assert.doesNotMatch(recentHtml, /Mensagem 02/);
-    for (const label of ['Home', 'Demandas', 'Talentos', 'Mensagens', 'Mais', 'Criar Demanda']) assert.match(html, new RegExp(label));
+    assert.doesNotMatch(recentHtml, /Ainda não existem conversas/);
+    for (const label of ['Home', 'Operações', 'Talentos', 'Mensagens', 'Mais', 'Criar Operação']) assert.match(html, new RegExp(label));
+    assert.match(html, /href="\/restaurant\/dashboard\/jobs\/create"[^>]*>.*Criar Operação/);
   } finally { app.unmount(); }
 });
 
@@ -247,6 +281,8 @@ test('home only shows conversations that also exist in the operational message c
       await empty.flush();
       const recentSection = empty.elements().find(item => item.props?.['aria-labelledby'] === 'conversations-heading');
       assert.doesNotMatch(renderToStaticMarkup(recentSection), /href="\/chat\//);
+      assert.match(renderToStaticMarkup(recentSection), /Ainda não existem conversas/);
+      assert.match(renderToStaticMarkup(recentSection), /As mensagens com profissionais contratados aparecerão aqui/);
       assert.doesNotMatch(empty.html(), /Responder/);
     } finally { empty.unmount(); }
   } finally { app.unmount(); }
@@ -263,16 +299,37 @@ test('home routes hiring to the demand confirmation instead of approving without
   } finally { app.unmount(); }
 });
 
-test('pending reviews are surfaced and replace the primary create action', async () => {
+test('pending reviews remain in actions and the fixed create operation button stays visible', async () => {
   const db = database();
   db.pending_reviews = [{ job_id:'finished',title:'Diária concluída',reviewed_name:'Ana' }];
   const app = mount(db);
   try {
     await app.flush();
-    assert.match(app.html(), /Antes de criar uma nova demanda/);
-    const primary = app.elements().find(item => item.props?.children === 'Avaliar para criar nova demanda');
-    assert.equal(primary.props.href,'/reviews/finished');
+    assert.match(app.html(), /Antes de criar uma nova operação/);
+    assert.match(app.html(), /href="\/restaurant\/dashboard\/jobs\/create"[^>]*>.*Criar Operação/);
     assert.doesNotMatch(app.html(), /Tudo em dia/);
+  } finally { app.unmount(); }
+});
+
+test('operation cards prioritize in-progress, today, tomorrow, then later dates', async () => {
+  const db = database();
+  db.jobs = [
+    job('future', { title: 'Cozinheiro', job_date: dateOffset(7) }),
+    job('tomorrow', { title: 'Auxiliar', job_date: dateOffset(1) }),
+    job('today', { title: 'Garçom', job_date: dateOffset(0), start_time: '22:00:00', end_time: '23:59:00' }),
+    job('running', { title: 'Bartender', job_date: dateOffset(0), status: 'in_progress', start_time: '00:00:00', end_time: '23:59:00' }),
+  ];
+  const app = mount(db);
+  try {
+    await app.flush();
+    const operations = app.elements().find(item => item.props?.['aria-labelledby'] === 'operations-heading');
+    const html = renderToStaticMarkup(operations);
+    const links = [...html.matchAll(/href="\/restaurant\/demands\/([^"]+)"/g)].map(match => match[1]);
+    assert.deepEqual(links, ['running', 'today', 'tomorrow', 'future']);
+    assert.match(html, /Em andamento/);
+    assert.match(html, /Rua Central, 123/);
+    assert.match(html, /São Paulo - SP/);
+    assert.match(html, /R\$\u00a0150,00/);
   } finally { app.unmount(); }
 });
 
@@ -290,7 +347,9 @@ test('empty home is honest and query failures never masquerade as all caught up'
       const html = app.html();
       if (!failure) {
         assert.match(html, /Tudo em dia/);
-        assert.match(html, /Nenhuma demanda futura/);
+        assert.match(html, /Nenhuma operação agendada/);
+        assert.match(html, /As próximas operações aparecerão aqui/);
+        assert.match(html, /Nenhuma pendência encontrada\. As próximas ações aparecerão aqui automaticamente\./);
       } else {
         assert.match(html, /role="alert"/);
         assert.doesNotMatch(html, /Tudo em dia/);
@@ -305,7 +364,7 @@ test('missing profile image uses an initial without inventing a profile photo', 
   const app = mount(db);
   try {
     await app.flush();
-    assert.doesNotMatch(app.html(), /alt="Foto do seu perfil"/);
+    assert.doesNotMatch(app.html(), /alt="Logo do restaurante"/);
     assert.match(app.html(), /aria-label="Meu perfil"/);
   } finally { app.unmount(); }
 });
@@ -337,9 +396,9 @@ test('restaurant navigation has exactly one active destination, including messag
   }).default;
   for (const [path, activeItem, expected] of [
     ['/restaurant/dashboard', undefined, 'Home'],
-    ['/restaurant/dashboard/jobs/create', undefined, 'Demandas'],
-    ['/restaurant/demands', undefined, 'Demandas'],
-    ['/restaurant/demands/example', undefined, 'Demandas'],
+    ['/restaurant/dashboard/jobs/create', undefined, 'Operações'],
+    ['/restaurant/demands', undefined, 'Operações'],
+    ['/restaurant/demands/example', undefined, 'Operações'],
     ['/restaurant/candidates', 'Talentos', 'Talentos'],
     ['/restaurant/candidates', 'Mensagens', 'Mensagens'],
     ['/restaurant/messages', 'Mensagens', 'Mensagens'],
@@ -366,6 +425,6 @@ test('Home groups staffing alerts and future demands without exposing staffing c
     assert.equal((app.html().match(/Equipe incompleta/g) ?? []).length, 1);
     assert.doesNotMatch(app.html(), /18 profissionais confirmados · 20 necessários/);
     assert.match(app.html(), /href="\/restaurant\/demands\/team"/);
-    assert.equal((app.html().match(/Abrir central da demanda/g) ?? []).length,1);
+    assert.equal((app.html().match(/href="\/restaurant\/demands\/team"/g) ?? []).length,2);
   } finally { app.unmount(); }
 });

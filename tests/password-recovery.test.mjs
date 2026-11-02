@@ -131,8 +131,8 @@ test('callback routes each outcome to the right page and message', async () => {
   console.error = () => {};
   try {
     const ok = loadCallback({ exchange: async () => ({ data: { user: { id: 'u' } }, error: null }) });
-    let res = await ok.GET('/auth/callback?code=abc&redirect=%2Frestaurant%2Fevents');
-    assert.equal(res.location.pathname, '/restaurant/events');
+    let res = await ok.GET('/auth/callback?code=abc&redirect=%2Frestaurant%2Fdemands');
+    assert.equal(res.location.pathname, '/restaurant/demands');
     res = await ok.GET(`/auth/callback?code=abc&${new URL(recovery.recoveryRedirectUrl('https://app.test')).searchParams}`);
     assert.equal(`${res.location.pathname}${res.location.search}`, '/settings/password');
 

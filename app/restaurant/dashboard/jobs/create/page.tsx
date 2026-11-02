@@ -7,25 +7,25 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { loadPendingReviews, type PendingReview } from '@/lib/operations';
+import { commonSpecialties } from '@/lib/specialties';
+import { emptyWorkLocation, resolveWorkLocation, validCoordinates } from '@/lib/work-location';
 
-interface AvailableEvent {
-  id: string;
-  title: string;
-  event_date: string;
-  revision: number;
-}
+const states = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
+  'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+];
 
 export default function CreateJobPage() {
-  const [title, setTitle] = useState('');
+  const [role, setRole] = useState('');
   const [description, setDescription] = useState('');
   const [jobDate, setJobDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [value, setValue] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [events, setEvents] = useState<AvailableEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(true);
-  const [eventId, setEventId] = useState('');
+  const [street, setStreet] = useState('');
+  const [number, setNumber] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [publishedId, setPublishedId] = useState<string | null>(null);
@@ -37,88 +37,79 @@ export default function CreateJobPage() {
 
   useEffect(() => {
     let active = true;
-    async function loadEvents() {
+    async function initialize() {
       const { data: auth, error: authError } = await supabase.auth.getUser();
       if (!active) return;
-      if (authError || !auth.user) { setErrorMessage('Faça login para criar uma demanda.'); return; }
+      if (authError || !auth.user) { setErrorMessage('Faça login para criar uma operação.'); return; }
       const reviews = await loadPendingReviews(supabase);
       if (!active) return;
       setPendingReviews(reviews);
       setReviewsReady(true);
-      const { data, error } = await supabase.from('events')
-        .select('id, title, event_date, revision')
-        .eq('restaurant_id', auth.user.id).order('event_date', { ascending: false });
-      if (!active) return;
-      if (error) setErrorMessage('Não foi possível carregar os eventos. Para vincular uma demanda a um evento, recarregue a página.');
-      else {
-        setEvents(data ?? []);
-        const requested = new URLSearchParams(window.location.search).get('event');
-        const selected = data?.find((event) => event.id === requested);
-        if (selected) {
-          setEventId(selected.id);
-          setJobDate(selected.event_date);
-        }
-      }
     }
-    void loadEvents().catch((error) => {
+    void initialize().catch((error) => {
       if (active) setErrorMessage(error instanceof Error ? error.message : 'Não foi possível carregar os dados para publicação. Recarregue a página.');
-    }).finally(() => {
-      if (active) setEventsLoading(false);
     });
     return () => { active = false; };
   }, [supabase]);
 
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (loading || eventsLoading || !reviewsReady || pendingReviews.length || publishedId) return;
+    if (loading || !reviewsReady || pendingReviews.length || publishedId) return;
     setLoading(true);
     setErrorMessage('');
 
     try {
-      const selectedEvent = eventId
-        ? events.find((event) => event.id === eventId)
-        : undefined;
-
-      if (eventId && !selectedEvent) {
-        throw new Error('Evento indisponível. Recarregue a página e selecione novamente.');
-      }
-
       const amount = Number(value);
       if (value.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
         throw new Error('Informe um valor de diária maior que zero.');
       }
-      const required = Number(quantity);
-      if (!Number.isInteger(required) || required < 1 || required > 50) {
-        throw new Error('Informe de 1 a 50 profissionais.');
-      }
-
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData.user) throw new Error('Sessão expirada. Faça login novamente.');
+      const location = await resolveWorkLocation({
+        ...emptyWorkLocation,
+        location_name: 'Local da Operação',
+        address: street,
+        number,
+        city,
+        state,
+      });
+      if (!validCoordinates(location.latitude, location.longitude)) {
+        throw new Error('Não foi possível confirmar as coordenadas do endereço.');
+      }
+      const { data: savedLocation, error: locationError } = await supabase.rpc('save_geocoded_work_location', {
+        p_name: 'Local da Operação',
+        p_address: street,
+        p_number: number,
+        p_city: city,
+        p_state: state,
+        p_latitude: location.latitude,
+        p_longitude: location.longitude,
+      });
+      if (locationError) throw new Error(locationError.message);
+      if (!savedLocation || typeof savedLocation !== 'object'
+        || !('id' in savedLocation) || typeof savedLocation.id !== 'string'
+        || !('revision' in savedLocation) || typeof savedLocation.revision !== 'number'
+        || !('geocoding_status' in savedLocation) || savedLocation.geocoding_status !== 'resolved'
+        || !('latitude' in savedLocation) || !validCoordinates(savedLocation.latitude, savedLocation.longitude)) {
+        throw new Error('O serviço não confirmou o local e as coordenadas da operação.');
+      }
       const { data: demandId, error } = await supabase.rpc('create_restaurant_demand', {
-        p_title: title,
+        p_title: role,
         p_description: description,
         p_job_date: jobDate,
         p_start_time: startTime,
         p_end_time: endTime,
         p_value: amount,
-        p_quantity: required,
-        p_location_source: selectedEvent ? 'event' : 'none',
-        p_work_location_id: null,
-        p_location_revision: null,
-        p_event_id: selectedEvent?.id ?? null,
-        p_event_revision: selectedEvent?.revision ?? null,
+        p_quantity: 1,
+        p_location_source: 'catalog',
+        p_work_location_id: savedLocation.id,
+        p_location_revision: savedLocation.revision,
       });
-      if (error) {
-        throw new Error(
-          error.code === '40001'
-            ? 'O evento foi alterado. Recarregue a página e confira o evento antes de publicar novamente.'
-            : error.message,
-        );
-      }
-      if (typeof demandId !== 'string') throw new Error('O serviço não confirmou a demanda criada.');
+      if (error) throw new Error(error.message);
+      if (typeof demandId !== 'string') throw new Error('O serviço não confirmou a operação criada.');
       setPublishedId(demandId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível publicar a demanda.');
+      setErrorMessage(error instanceof Error ? error.message : 'Não foi possível publicar a operação.');
     } finally { setLoading(false); }
   };
 
@@ -127,8 +118,8 @@ export default function CreateJobPage() {
       <Card className="mx-auto max-w-xl space-y-6">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Nova Demanda</h1>
-            <p className="text-sm text-gray-500 mt-1">Uma necessidade operacional. De 1 a 50 profissionais.</p>
+            <h1 className="text-2xl font-bold text-gray-900">Nova Operação</h1>
+            <p className="text-sm text-gray-500 mt-1">Publique uma oportunidade e receba candidaturas de profissionais disponíveis.</p>
           </div>
           <Link
             href="/restaurant/demands"
@@ -143,108 +134,108 @@ export default function CreateJobPage() {
         )}
 
         {publishedId ? <section className="space-y-5">
-          <Toast tone="success">Demanda publicada com sucesso. Os convites são opcionais e não alteram a publicação.</Toast>
+          <Toast tone="success">Operação publicada com sucesso. Os convites são opcionais e não alteram a publicação.</Toast>
           <h2 className="text-xl font-semibold">Convidar profissionais da sua Rede de Talentos</h2>
           <Link href={`/restaurant/demands/${publishedId}?view=talents`} className="ec-button ec-button--primary w-full px-4">Convidar Agora</Link>
           <Button onClick={() => { router.push(`/restaurant/demands/${publishedId}`); router.refresh(); }} className="w-full px-4">Pular</Button>
         </section> : pendingReviews.length ? <section className="space-y-3">
-          <Toast tone="info">Antes de criar uma nova demanda, avalie sua última experiência.</Toast>
+          <Toast tone="info">Antes de criar uma nova operação, avalie sua última experiência.</Toast>
           {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
         </section> : <form onSubmit={handleCreateJob} className="space-y-4">
-          <fieldset disabled={loading || eventsLoading || !reviewsReady} className="min-w-0 space-y-4">
+          <fieldset disabled={loading || !reviewsReady} className="min-w-0 space-y-4">
           <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-1" className="block text-sm font-medium text-gray-700 mb-1">Nome da demanda</label>
-            <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-1"
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ex: Cozinheiro(a), Garçom, Auxiliar"
-              className="w-full"
-            />
+            <label htmlFor="operation-role" className="mb-1 block text-sm font-medium text-gray-700">Função</label>
+            <Select id="operation-role" required value={role} onChange={(event) => setRole(event.target.value)} className="w-full">
+              <option value="">Selecione uma função</option>
+              {commonSpecialties.filter((specialty) => specialty !== 'Eventos').map((specialty) => <option key={specialty} value={specialty}>{specialty}</option>)}
+            </Select>
           </div>
 
-          <div>
-            <label htmlFor="demand-quantity" className="mb-1 block text-sm font-medium text-gray-700">Profissionais necessários</label>
-            <TextInput id="demand-quantity" type="number" min={1} max={50} step={1} required value={quantity} onChange={(event) => setQuantity(event.target.value)} />
-          </div>
-
-          <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-2" className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-            <TextArea id="field-restaurant-dashboard-jobs-create-page-tsx-2"
-              rows={4}
-              required
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Descreva as atribuições, uniforme exigido e detalhes do plantão..."
-              className="w-full"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-3" className="block text-sm font-medium text-gray-700 mb-1">Data</label>
-            <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-3"
+          <fieldset className="space-y-3 rounded-xl border border-gray-200 p-4">
+            <legend className="px-1 font-semibold text-gray-900">Quando?</legend>
+            <div>
+              <label htmlFor="operation-date" className="mb-1 block text-sm font-medium text-gray-700">Data</label>
+              <TextInput id="operation-date"
               type="date"
               required
               value={jobDate}
               onChange={(e) => setJobDate(e.target.value)}
               className="w-full"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="job-event" className="mb-1 block text-sm font-semibold">Evento vinculado (opcional)</label>
-            <Select id="job-event" value={eventId} disabled={loading} className="w-full" onChange={(event) => {
-              setEventId(event.target.value);
-              const selected = events.find((item) => item.id === event.target.value);
-              if (selected) {
-                setJobDate(selected.event_date);
-              }
-            }}>
-              <option value="">{eventsLoading ? 'Carregando eventos...' : 'Demanda independente'}</option>
-              {events.map((event) => <option key={event.id} value={event.id}>{event.title} · {event.event_date}</option>)}
-            </Select>
-            <p className="mt-1 text-sm text-gray-600">
-              {eventId
-                ? 'A demanda receberá uma cópia do local do evento, mesmo sem coordenadas. Alterações posteriores no evento não modificarão esta demanda.'
-                : 'A demanda será criada sem local definido.'}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
+              />
+            </div>
             <div>
-              <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-4" className="block text-sm font-medium text-gray-700 mb-1">Horário Inicial</label>
-              <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-4"
+              <p className="mb-1 text-sm font-medium text-gray-700">Horário</p>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <TextInput id="operation-start-time"
                 type="time"
                 required
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
                 className="w-full"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-5" className="block text-sm font-medium text-gray-700 mb-1">Horário Final</label>
-              <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-5"
+                aria-label="Horário de início"
+                />
+                <span className="text-sm text-gray-500">até</span>
+                <TextInput id="operation-end-time"
                 type="time"
                 required
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
                 className="w-full"
-              />
+                aria-label="Horário de fim"
+                />
+              </div>
             </div>
-          </div>
+          </fieldset>
 
           <div>
-            <label htmlFor="field-restaurant-dashboard-jobs-create-page-tsx-6" className="block text-sm font-medium text-gray-700 mb-1">Diária por profissional (R$)</label>
-            <TextInput id="field-restaurant-dashboard-jobs-create-page-tsx-6"
+            <label htmlFor="operation-daily-rate" className="mb-1 block text-sm font-medium text-gray-700">Diária</label>
+            <TextInput id="operation-daily-rate"
               type="number"
               inputMode="decimal"
               step="0.01"
               required
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              placeholder="Ex: 180.00"
+              placeholder="R$ 150,00"
+              className="w-full"
+            />
+          </div>
+
+          <fieldset className="space-y-3 rounded-xl border border-gray-200 p-4">
+            <legend className="px-1 font-semibold text-gray-900">Local da Operação</legend>
+            <div>
+              <label htmlFor="operation-street" className="mb-1 block text-sm font-medium text-gray-700">Rua</label>
+              <TextInput id="operation-street" required maxLength={300} value={street} onChange={(event) => setStreet(event.target.value)} className="w-full" />
+            </div>
+            <div>
+              <label htmlFor="operation-number" className="mb-1 block text-sm font-medium text-gray-700">Número</label>
+              <TextInput id="operation-number" required maxLength={30} value={number} onChange={(event) => setNumber(event.target.value)} className="w-full" />
+            </div>
+            <div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="operation-city" className="mb-1 block text-sm font-medium text-gray-700">Cidade</label>
+                  <TextInput id="operation-city" required maxLength={120} value={city} onChange={(event) => setCity(event.target.value)} className="w-full" />
+                </div>
+                <div>
+                  <label htmlFor="operation-state" className="mb-1 block text-sm font-medium text-gray-700">Estado</label>
+                  <Select id="operation-state" required value={state} onChange={(event) => setState(event.target.value)} className="w-full">
+                    <option value="">UF</option>
+                    {states.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <div>
+            <label htmlFor="operation-details" className="mb-1 block text-sm font-medium text-gray-700">Detalhes</label>
+            <TextArea id="operation-details"
+              rows={4}
+              required
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Descreva as atribuições, uniforme exigido e detalhes do plantão..."
               className="w-full"
             />
           </div>
@@ -262,7 +253,7 @@ export default function CreateJobPage() {
               busy={loading}
               className="inline-flex items-center justify-center px-6 py-2.5 text-sm shadow-sm"
             >
-              {loading ? 'Publicando...' : 'Publicar Demanda'}
+              {loading ? 'Publicando...' : 'Publicar Operação'}
             </Button>
           </div>
           </fieldset>

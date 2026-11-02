@@ -21,7 +21,7 @@ test('all requested protected namespaces include their root and descendants', ()
 test('roles have explicit dashboards and cannot access the opposite namespace', () => {
   assert.equal(dashboardFor('restaurant'), '/restaurant/dashboard');
   assert.equal(dashboardFor('worker'), '/worker/dashboard');
-  assert.equal(canAccessPath('/restaurant/events', 'worker'), false);
+  assert.equal(canAccessPath('/restaurant/demands', 'worker'), false);
   assert.equal(canAccessPath('/worker/dashboard', 'restaurant'), false);
   assert.equal(canAccessPath('/chat/123', 'restaurant'), true);
   assert.equal(canAccessPath('/notifications', 'worker'), true);
@@ -33,7 +33,7 @@ test('roles have explicit dashboards and cannot access the opposite namespace', 
 
 test('safe redirects preserve deep links, queries and fragments', () => {
   for (const path of [
-    '/restaurant/dashboard', '/restaurant/events',
+    '/restaurant/dashboard', '/restaurant/demands',
     '/notifications', '/profile', '/chat/123', '/chat/123?from=push#latest', '/payment/123',
   ]) {
     assert.equal(sanitizeRedirect(path, 'restaurant'), path);
@@ -58,7 +58,7 @@ test('external, ambiguous, encoded and public targets fall back to the role dash
 
 test('wrong-role redirects produce the friendly denial reason', () => {
   assert.equal(
-    sanitizeRedirect('/restaurant/events', 'worker'),
+    sanitizeRedirect('/restaurant/demands', 'worker'),
     '/worker/dashboard?reason=role_forbidden',
   );
   assert.equal(
@@ -74,5 +74,5 @@ test('login URL encodes the original route as data, not another navigation targe
   assert.equal(url.searchParams.get('redirect'), original);
   assert.equal(url.searchParams.get('reason'), 'session_expired');
   assert.equal(url.hash, '');
-  assert.equal(new URL(loginHref('/restaurant/events'), url).searchParams.has('reason'), false);
+  assert.equal(new URL(loginHref('/restaurant/demands'), url).searchParams.has('reason'), false);
 });

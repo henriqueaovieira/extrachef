@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { useCommunication } from '@/app/components/communication-state';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 type NotificationCategory = 'application' | 'operational' | 'review' | 'event' | 'reservation';
 type Filter = 'all' | 'unread' | NotificationCategory;
@@ -173,11 +174,14 @@ export default function NotificationCenter() {
       <section className="mx-auto max-w-3xl space-y-5">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            {role === 'restaurant' && <Link href="/restaurant/more" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Mais</Link>}
-            <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
+            <DashboardLogo role={role ?? undefined} />
             <h1 className="mt-1 text-2xl font-bold text-gray-950">Notificações</h1>
             <p className="mt-1 text-sm text-gray-600">{unreadCount === null ? countError ? 'Indicadores indisponíveis' : 'Atualizando indicadores...' : `${unreadCount} não lida(s)`}</p>
-            {role === 'worker' && <Link href="/worker/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-700">Voltar ao Dashboard</Link>}
+            {role === 'restaurant' ? (
+              <Link href="/restaurant/more" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-700">← Mais</Link>
+            ) : (
+              <Link href="/worker/dashboard" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-700">← Início</Link>
+            )}
           </div>
           <Button
             type="button"
@@ -189,7 +193,7 @@ export default function NotificationCenter() {
           </Button>
         </header>
 
-        <Link href={role === 'restaurant' ? '/restaurant/messages' : '/worker/applications#chats'} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 bg-white px-4 font-semibold text-gray-800">
+        <Link href={role === 'restaurant' ? '/restaurant/candidates#chats' : '/worker/messages'} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 bg-white px-4 font-semibold text-gray-800">
           Mensagens {counts.messages !== null && counts.messages > 0 ? `(${counts.messages})` : ''}
         </Link>
         <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Filtrar notificações">

@@ -10,7 +10,10 @@ export interface HomeJob {
   status: string;
   location_name: string | null;
   work_address: string | null;
+  work_number?: string | null;
   work_city: string | null;
+  work_state?: string | null;
+  value?: number | string | null;
 }
 
 export function groupHomeJobs(jobs: HomeJob[]) {

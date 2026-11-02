@@ -6,6 +6,7 @@ import { Button, LoadingSkeleton, TextInput, Toast } from '@/app/components/ui';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
 import { phaseLabels, readOperationalContext, type OperationalContext } from '@/lib/operations';
+import { getDeviceCoordinates } from '@/lib/geolocation';
 
 export default function OperationalPanel({ jobId }: { jobId: string }) {
   const [supabase] = useState(() => createClient());
@@ -48,7 +49,13 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
     if (busy) return;
     setBusy(true); setError(''); setNotice('');
     try {
-      const { data, error } = await supabase.rpc(rpc, { p_job_id: jobId, ...args });
+      const parameters: Record<string, string | number> = { p_job_id: jobId, ...args };
+      if (rpc === 'issue_operational_code' && args.p_stage === 'checkin') {
+        const { latitude, longitude } = await getDeviceCoordinates();
+        parameters.p_latitude = latitude;
+        parameters.p_longitude = longitude;
+      }
+      const { data, error } = await supabase.rpc(rpc, parameters);
       if (error) throw new Error(error.message);
       if (rpc === 'interrupt_operational_assignment') {
         if (typeof data !== 'string') throw new Error('O serviço não confirmou a reabertura.');
@@ -83,7 +90,7 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28">
       <section className="mx-auto max-w-xl space-y-5">
-        <Link href={returnHref} className="inline-flex min-h-11 items-center text-sm font-semibold">← {worker ? 'Minhas operações' : 'Voltar à demanda'}</Link>
+        <Link href={returnHref} className="inline-flex min-h-11 items-center text-sm font-semibold">← {worker ? 'Minhas operações' : 'Voltar à operação'}</Link>
         <h1 className="text-2xl font-semibold">Operação ExtraChef</h1>
         {error && <Toast tone="error"><p>{error}</p><Button variant="ghost" className="px-0 underline" onClick={() => setRetry((value) => value + 1)}>Atualizar</Button></Toast>}
         {notice && <Toast tone="success">{notice}</Toast>}
@@ -96,9 +103,10 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
               <p className="mt-1 text-sm text-gray-600">{new Date(context.starts_at).toLocaleString('pt-BR')} — {new Date(context.ends_at).toLocaleString('pt-BR')}</p>
             </div>
             <p role="status" className="rounded-xl bg-orange-50 p-4 font-semibold text-orange-900">{phaseLabels[context.phase] ?? context.phase}</p>
-            {context.phase === 'confirmed' && <p className="text-sm text-gray-600">No dia da demanda, realize o check-in ao chegar.</p>}
+            {context.phase === 'confirmed' && <p className="text-sm text-gray-600">No dia da operação, realize o check-in ao chegar.</p>}
             {context.phase === 'working' && !ended && <p className="text-sm text-gray-600">O trabalho está em andamento. Ao final do horário, o pagamento será a próxima etapa.</p>}
             {arriving && <p className="text-sm text-gray-600">{worker ? 'Apresente seu código à empresa. Ela confirma sua chegada digitando o código no aplicativo dela.' : 'Confira a chegada e digite o código apresentado pelo profissional. Um atraso não é uma ausência confirmada.'}</p>}
+            {arriving && worker && !validCode && <p className="text-sm text-gray-600">Para gerar o código, permita o acesso pontual à localização e esteja a até 100 metros do local da operação. Não há rastreamento contínuo.</p>}
             {checkout && <p className="text-sm text-gray-600">{worker ? 'Solicite o código à empresa e digite abaixo para concluir.' : 'Informe este código ao profissional. Somente ele pode validar o checkout.'}</p>}
             {(arriving || checkout) && (issuer ? (
               <div className="space-y-3">
@@ -139,7 +147,7 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
               </> : <p className="text-sm text-gray-600">Aguardando pagamento. O checkout será liberado somente após você confirmar recebimento.</p>}
             </div>}
             {context.phase === 'completed' && <div className="space-y-3">
-              <p className="text-sm text-gray-600">O encerramento foi registrado. Você pode avaliar depois, mas precisa avaliar antes da próxima {worker ? 'candidatura' : 'demanda'}.</p>
+              <p className="text-sm text-gray-600">O encerramento foi registrado. Você pode avaliar depois, mas precisa avaliar antes da próxima {worker ? 'candidatura' : 'operação'}.</p>
               <Link href={`/reviews/${jobId}`} className="ec-button ec-button--primary w-full px-4">{context.review_pending ? 'Avaliar experiência' : 'Ver avaliação'}</Link>
             </div>}
             {(context.checkin_at || context.receipt_confirmed_at || context.checkout_at) && <dl className="space-y-2 border-t border-gray-100 pt-4 text-xs text-gray-600">

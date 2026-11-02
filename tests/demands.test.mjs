@@ -141,8 +141,9 @@ test('cards are accessible full-page links with the same operational structure a
 test('creation and details wire persistent RPCs and never mutate job columns directly', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.match(create, /rpc\('create_restaurant_demand'/);
-  assert.match(create, /p_quantity: required/);
-  assert.match(create, /max=\{50\}/);
+  assert.match(create, /p_quantity: 1/);
+  assert.match(create, /p_location_source: 'catalog'/);
+  assert.match(create, /p_work_location_id: savedLocation\.id/);
   const card = source('../app/components/demand-card.tsx');
   assert.match(card, /p_action: 'cancel'/);
   assert.match(source('../lib/demand-detail.ts'), /navigator\.share/);
@@ -190,6 +191,7 @@ function mountList({ jobs = [], applications = [], reserves = [], failure = fals
     'next/navigation': { useSearchParams: () => params },
     '@/app/components/ui': ui,
     '@/app/components/mobile-bottom-nav': { default: () => null },
+    '@/app/components/dashboard-identity': { DashboardLogo: ({ role }) => React.createElement('a', { href: `/${role}/dashboard` }, 'ExtraChef') },
     '@/app/components/demand-card': { default: components.default },
     '@/lib/supabase/client': { createClient: () => ({}) },
     '@/lib/demands': { ...domain, loadDemands: async () => {
@@ -233,15 +235,15 @@ test('actual list distinguishes loading, empty and failure; retry recovers witho
   const app = mountList({ failure: true });
   try {
     await app.flush();
-    assert.match(app.html(), /Não foi possível carregar suas demandas/);
+    assert.match(app.html(), /Não foi possível carregar suas operações/);
     assert.match(app.html(), /offline/);
-    assert.doesNotMatch(app.html(), /Você ainda não possui demandas/);
+    assert.doesNotMatch(app.html(), /Você ainda não possui operações/);
     assert.match(app.html(), /<dd[^>]*>—<\/dd>/);
     app.recover();
     await app.click('Tentar Novamente');
-    assert.match(app.html(), /Você ainda não possui demandas/);
-    assert.match(app.html(), /Crie sua primeira demanda e encontre profissionais rapidamente/);
-    assert.match(app.html(), /Criar Demanda/);
+    assert.match(app.html(), /Você ainda não possui operações/);
+    assert.match(app.html(), /Crie sua primeira operação e encontre profissionais rapidamente/);
+    assert.match(app.html(), /Criar Operação/);
   } finally { app.unmount(); }
 });
 
@@ -259,7 +261,7 @@ test('actual list filters with URL state, keeps archived operations separate and
     assert.match(app.html(), /aria-pressed="true"[^>]*>Concluídas/);
     assert.match(globalThis.window.location.href, /filter=completed/);
     await app.click('Canceladas');
-    assert.match(app.html(), /Nenhuma demanda neste filtro/);
+    assert.match(app.html(), /Nenhuma operação neste filtro/);
     await app.click('Contratando');
     assert.equal(app.nodes().filter(node => node.type === components.default).length, 20);
   } finally { app.unmount(); }

@@ -244,6 +244,18 @@ Faixas: 95+ Excelente; 85+ Muito Confiável; 70+ Confiável; 50+ Em Desenvolvime
 abaixo de 50 Atenção. Antecipações são contadas, sem bônus fora da fórmula.
 O Score é um indicador operacional, não uma probabilidade estatística validada.
 
+### Agenda descontinuada e localizacao das demandas
+
+A interface Agenda/Eventos nao faz mais parte do produto. Novas demandas usam
+automaticamente o endereco principal do restaurante, convertido em um local
+padrao interno de `work_locations`, sem evento ou cadastro manual de local.
+Perfil sem endereco valido bloqueia a publicacao com erro explicito.
+
+Aplicar `20261019000000_demand_restaurant_location.sql` antes do novo frontend.
+Nenhuma tabela, migration historica, RLS ou constraint e removida. Os caminhos
+legados das RPCs e snapshots existentes permanecem compativeis.
+Ver [plano de implantacao e relatorio](docs/agenda-retirement-report.md).
+
 ### Agendamento e implantação
 
 Aplicar todas as migrations anteriores antes das novas, em ordem. A migration

@@ -139,9 +139,39 @@ test('worker home and profile screens do not invent scores or replace failed rea
   const dashboard = readFileSync(new URL('../app/worker/dashboard/page.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(dashboard, /profile\?\.score\s*\|\|\s*5/);
   assert.doesNotMatch(dashboard, /average_rating\s*\?\?\s*0|current_score\s*\?\?.*0/);
-  assert.match(dashboard, /stats\.average_rating > 0/);
+  assert.match(dashboard, /max-w-6xl grid-cols-2 gap-2 px-4 pt-10 sm:gap-4 sm:px-6 lg:grid-cols-4/);
+  assert.match(dashboard, /header className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12"/);
+  assert.match(dashboard, /profile\?\.name \|\| 'Profissional'/);
+  assert.match(dashboard, /sm:pb-\[calc\(12rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(dashboard, /Encontre operações e acompanhe suas candidaturas\./);
+  assert.match(dashboard, /DashboardLogo role="worker"/);
+  assert.match(dashboard, /DashboardAvatar role="worker"/);
+  assert.match(dashboard, /OperationalReputationView summary/);
+  assert.match(dashboard, /Bem-vindo 👋/);
+  assert.match(dashboard, /Encontre operações e acompanhe suas candidaturas\./);
+  assert.doesNotMatch(dashboard, /profile\?\.city|Olá, \{profile/);
+  assert.doesNotMatch(dashboard, /CommunicationNavigation|Acompanhar minhas operações/);
+  assert.ok(dashboard.indexOf("label: 'Candidaturas'") < dashboard.indexOf("label: 'Diárias concluídas'"));
+  assert.ok(dashboard.indexOf("label: 'Diárias concluídas'") < dashboard.indexOf("label: 'Ganhos estimados'"));
+  assert.ok(dashboard.indexOf("label: 'Ganhos estimados'") < dashboard.indexOf('<OperationalReputationView summary />'));
+  assert.match(dashboard, /useState\(0\)/);
+  assert.match(dashboard, /value: `R\$ \$\{estimatedEarnings\.toLocaleString\('pt-BR', \{ minimumFractionDigits: 2, maximumFractionDigits: 2 \}\)\}`/);
+  assert.match(dashboard, /lg:grid-cols-4/);
+  assert.doesNotMatch(dashboard, /Indisponível|Ganhos estimados.*'—'/);
+  assert.doesNotMatch(dashboard, /earningsError|Avaliação média/);
+  assert.match(dashboard, /setTimeout\([\s\S]*?,\s*9000\)/);
+  assert.match(dashboard, /className="hidden"[\s\S]*Mostrar distâncias estimadas/);
   assert.match(dashboard, /statsError && <Toast/);
-  assert.match(dashboard, /earningsError && <Toast/);
+  assert.doesNotMatch(dashboard, /earningsError|Ganhos estimados.*Toast/);
+  assert.match(dashboard, /Worker estimated earnings lookup failed/);
+  assert.doesNotMatch(dashboard, /earningsResult\.error\.message|profileResult\.error\.message|statsResult\.error\.message/);
+
+  const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
+  assert.match(navigation, /showOnDesktop \? '' : 'md:hidden'/);
+  assert.match(navigation, /whitespace-normal text-\[10px\]/);
+  const reputation = readFileSync(new URL('../app/components/operational-reputation.tsx', import.meta.url), 'utf8');
+  assert.match(reputation, /Confiança<\/p>/);
+  assert.doesNotMatch(reputation.slice(reputation.indexOf('if (summary)'), reputation.indexOf('return loading ?')), /Confiança operacional/);
 
   for (const path of ['../app/components/profile-overview.tsx', '../app/profile/page.tsx']) {
     const profile = readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -149,4 +179,98 @@ test('worker home and profile screens do not invent scores or replace failed rea
     assert.doesNotMatch(profile, /profile\.score\.toFixed/);
     assert.match(profile, /OperationalReputationView/);
   }
+});
+
+test('restaurant and worker dashboards share logo, avatar and notification components', () => {
+  const restaurant = readFileSync(new URL('../app/restaurant/dashboard/page.tsx', import.meta.url), 'utf8');
+  const worker = readFileSync(new URL('../app/worker/dashboard/page.tsx', import.meta.url), 'utf8');
+  for (const [source, role] of [[restaurant, 'restaurant'], [worker, 'worker']]) {
+    assert.match(source, new RegExp(`<DashboardLogo role="${role}" \\/>`));
+    assert.match(source, new RegExp(`<DashboardAvatar role="${role}"`));
+    assert.match(source, /<NotificationBell iconOnly \/>/);
+  }
+});
+
+test('all requested account screens render the shared DashboardLogo component', () => {
+  const screens = [
+    '../app/restaurant/dashboard/page.tsx',
+    '../app/restaurant/demands/page.tsx',
+    '../app/restaurant/messages/message-center.tsx',
+    '../app/components/more-navigation.tsx',
+    '../app/components/profile-overview.tsx',
+    '../app/worker/dashboard/page.tsx',
+    '../app/worker/applications/page.tsx',
+    '../app/worker/messages/page.tsx',
+    '../app/worker/profile/page.tsx',
+    '../app/worker/profile/details/page.tsx',
+  ];
+  for (const path of screens) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+    assert.ok(/DashboardLogo|MoreNavigation role=|ProfileOverview role=/.test(source), path);
+  }
+
+  for (const path of [
+    '../app/components/profile-overview.tsx',
+    '../app/components/profile-editor.tsx',
+    '../app/components/notification-center.tsx',
+    '../app/components/privacy-settings.tsx',
+    '../app/reviews/[jobId]/review-client.tsx',
+    '../app/page.tsx',
+    '../app/profile/page.tsx',
+  ]) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /<p[^>]*>\s*ExtraChef\s*<\/p>/, path);
+  }
+
+  const logo = readFileSync(new URL('../app/components/dashboard-identity.tsx', import.meta.url), 'utf8');
+  assert.match(logo, /className="text-lg font-bold tracking-\[-0\.06em\]"/);
+});
+
+test('worker applications screen reuses shared identity, aligned containers and hides unavailable operations', () => {
+  const applications = readFileSync(new URL('../app/worker/applications/page.tsx', import.meta.url), 'utf8');
+  assert.match(applications, /DashboardLogo role="worker"/);
+  assert.match(applications, /DashboardAvatar[\s\S]*role="worker"/);
+  assert.doesNotMatch(applications, /CommunicationNavigation|NotificationBell/);
+  assert.match(applications, /max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12/);
+  assert.match(applications, /max-w-6xl space-y-6 px-4 sm:px-6/);
+  assert.match(applications, /application\.job !== null/);
+  assert.match(applications, /visibleApplications\.map/);
+  assert.doesNotMatch(applications, /Vaga indisponível|Operação indisponível/);
+  assert.match(applications, /← Voltar/);
+  assert.match(applications, /<summary[^>]*>Orientações<\/summary>/);
+  assert.doesNotMatch(applications, /Orientações e contato|Voltar às vagas/);
+  assert.match(applications, /<MobileBottomNav role="worker" showOnDesktop \/>/);
+  const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
+  assert.match(navigation, /href: '\/worker\/messages', label: 'Mensagens'/);
+  assert.doesNotMatch(navigation, /worker\/applications#chats|useSyncExternalStore/);
+});
+
+test('worker messages index links only approved applications with existing messages to the existing chat', () => {
+  const messages = readFileSync(new URL('../app/worker/messages/page.tsx', import.meta.url), 'utf8');
+  assert.match(messages, /\.eq\('status', 'approved'\)/);
+  assert.match(messages, /\.from\('messages'\)/);
+  assert.match(messages, /\.eq\('job_id', item\.job_id\)/);
+  assert.match(messages, /return data \? \{ item, message: data \} : null/);
+  assert.match(messages, /href=\{`\/chat\/\$\{conversation\.job_id\}`\}/);
+  assert.match(messages, /Ainda não existem conversas\./);
+  assert.match(messages, /As mensagens das operações aparecerão aqui\./);
+  assert.match(messages, /DashboardLogo role="worker"/);
+  assert.match(messages, /DashboardAvatar/);
+  assert.match(messages, /DashboardNav role="worker" showOnDesktop/);
+  assert.doesNotMatch(messages, /rpc\(|\.insert\(|\.update\(/);
+  const communicationNavigation = readFileSync(new URL('../app/components/communication-navigation.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(communicationNavigation, /worker\/applications#chats/);
+});
+
+test('worker monthly earnings are limited to completed, confirmed payments in the current local month', () => {
+  const migration = readFileSync(new URL('../supabase/migrations/20261019020000_worker_monthly_paid_earnings.sql', import.meta.url), 'utf8');
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.get_worker_estimated_earnings\(\)\s+RETURNS numeric/);
+  assert.match(migration, /SECURITY DEFINER\s+SET search_path = ''/);
+  assert.match(migration, /date_trunc\('month', now\(\) AT TIME ZONE 'America\/Sao_Paulo'\)/);
+  assert.match(migration, /SUM\(assignments\.amount\)/);
+  assert.match(migration, /assignments\.checkout_at IS NOT NULL/);
+  assert.match(migration, /assignments\.receipt_confirmed_at >= month_start/);
+  assert.match(migration, /assignments\.receipt_confirmed_at < month_start \+ interval '1 month'/);
+  assert.match(migration, /assignments\.payment_disputed_at IS NULL/);
+  assert.match(migration, /COALESCE\(SUM\(assignments\.amount\), 0\)/);
 });

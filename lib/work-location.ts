@@ -24,10 +24,10 @@ export function validateWorkAddress(location: WorkLocation) {
   if (location.address.trim().length < 3 || location.address.length > 300
     || location.city.trim().length < 2 || location.city.length > 120
     || !/^[A-Z]{2}$/.test(location.state)
-    || !/^\d{5}-?\d{3}$/.test(location.postal_code)
+    || (location.postal_code !== '' && !/^\d{5}-?\d{3}$/.test(location.postal_code))
     || location.location_name.length > 160 || location.number.length > 30
     || location.neighborhood.length > 120) {
-    throw new Error('Informe endereço, cidade, UF e CEP válidos para o local do trabalho.');
+    throw new Error('Informe endereço, cidade e UF válidos; se informar CEP, use um formato válido.');
   }
 }
 

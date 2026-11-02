@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, LoadingSkeleton, TextInput, Toast } from '@/app/components/ui';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 import { createClient } from '@/lib/supabase/client';
 import { signDemandPhotos, type DemandPerson } from '@/lib/demand-detail';
 import { loadRestaurantMessageInbox, type RestaurantMessageConversation, type RestaurantOperationalStatus } from '@/lib/restaurant-message-inbox';
@@ -138,7 +139,10 @@ export default function RestaurantMessageCenter() {
   return (
     <main className="min-h-screen bg-[#fafaf9] px-4 py-6 pb-28 text-gray-950 sm:px-8 sm:py-9">
       <section className="mx-auto max-w-5xl space-y-5">
-        <header>
+      <div className="mb-8">
+        <DashboardLogo role="restaurant" />
+      </div>
+      <header>
           <Link href="/restaurant/dashboard" className="mb-3 inline-flex min-h-9 items-center text-xs font-semibold text-gray-500">← Home</Link>
           <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Mensagens</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-600">Acompanhe suas operações e converse com profissionais já contratados.</p>
@@ -148,7 +152,7 @@ export default function RestaurantMessageCenter() {
           <span aria-hidden="true">⌕</span>
           <span className="sr-only">Buscar mensagens</span>
           <TextInput type="search" value={search} onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar profissionais, operações ou demandas..."
+            placeholder="Buscar profissionais ou operações..."
             className="min-h-10 border-0 bg-transparent px-0 shadow-none focus:border-0 focus:outline-none" />
         </label>
 
@@ -187,7 +191,7 @@ export default function RestaurantMessageCenter() {
               icon={<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-9"><path d="M5 8.5A3.5 3.5 0 0 1 8.5 5h15A3.5 3.5 0 0 1 27 8.5v10a3.5 3.5 0 0 1-3.5 3.5H16l-6 5v-5h-1.5A3.5 3.5 0 0 1 5 18.5z" /><path d="M10 12h12m-12 4h8" /></svg>}
               title={conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa disponível.'}
               description={conversations.length ? 'Ajuste a busca para localizar outra conversa.' : 'As mensagens serão criadas automaticamente após uma contratação.'}
-              action={conversations.length ? <Button onClick={() => setSearch('')}>Limpar busca</Button> : <Link href="/restaurant/demands" className="ec-button ec-button--primary px-4">Ver Demandas</Link>}
+              action={conversations.length ? <Button onClick={() => setSearch('')}>Limpar busca</Button> : <Link href="/restaurant/demands" className="ec-button ec-button--primary px-4">Ver Operações</Link>}
             />}
       </section>
       <MobileBottomNav role="restaurant" activeItem="Mensagens" showOnDesktop />

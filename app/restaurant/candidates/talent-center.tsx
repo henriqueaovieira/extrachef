@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 import { buildDemands, demandWindow, loadDemands, type Demand } from '@/lib/demands';
 import { signDemandPhotos } from '@/lib/demand-detail';
 import type { OperationalReputation } from '@/lib/operations';
+import { commonSpecialties } from '@/lib/specialties';
 import {
   classifyDemandTalents,
   demandStatusLabels,
@@ -67,8 +68,6 @@ const tabs: Array<{ id: TalentTab; label: string }> = [
   { id: 'invited', label: 'Convidados' },
   { id: 'interests', label: 'Interesses' },
 ];
-
-const commonSpecialties = ['Garçom', 'Eventos', 'Bar', 'Buffet', 'Atendimento', 'Cozinha', 'Auxiliar', 'Bartender'];
 
 function formatDate(value: string | null) {
   if (!value) return '—';
@@ -164,7 +163,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
             .select('demand_id, worker_id, status')
             .in('demand_id', demandIds.slice(offset, offset + 100));
           if (invitationError) throw new Error(invitationError.message);
-          if (!data) throw new Error('O serviço não retornou os convites das demandas.');
+          if (!data) throw new Error('O serviço não retornou os convites das operações.');
           invitationRows.push(...data as InvitationRow[]);
         }
         const signed = await signDemandPhotos(supabase, rows);
@@ -479,22 +478,22 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     {visibleInvited.length ? cardGrid(visibleInvited)
       : invitedPeople.length ? filteredOut
         : suggestions.length ? <div className="space-y-3">
-          <p className="text-sm text-gray-600">Nenhum profissional convidado para esta demanda.</p>
+          <p className="text-sm text-gray-600">Nenhum profissional convidado para esta operação.</p>
           <h3 className="text-sm font-semibold text-gray-900">Sugestões para convidar</h3>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{suggestions.map((talent) => renderCard(talent, null))}</div>
         </div>
-          : <div className="text-sm text-gray-600"><p className="font-medium text-gray-800">Nenhum profissional convidado.</p><p>Aguardando candidaturas para esta demanda.</p></div>}
+          : <div className="text-sm text-gray-600"><p className="font-medium text-gray-800">Nenhum profissional convidado.</p><p>Aguardando candidaturas para esta operação.</p></div>}
   </section>;
 
   const candidateSection = <section aria-labelledby="candidates-heading" className="space-y-3">
     <SectionHeading id="candidates-heading" count={candidatePeople.length}>Candidatos</SectionHeading>
     {visibleCandidates.length ? cardGrid(visibleCandidates)
       : candidatePeople.length ? filteredOut
-        : <p className="text-sm text-gray-600">Nenhuma candidatura para esta demanda ainda.</p>}
+        : <p className="text-sm text-gray-600">Nenhuma candidatura para esta operação ainda.</p>}
   </section>;
 
-  const noDemand = <EmptyState title="Nenhuma demanda ativa." description="Talentos é organizado pela demanda atual. Crie uma demanda para receber candidaturas e convidar profissionais."
-    action={<Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary px-4">Criar demanda</Link>} />;
+  const noDemand = <EmptyState title="Nenhuma operação ativa." description="Talentos é organizado pela operação atual. Crie uma operação para receber candidaturas e convidar profissionais."
+    action={<Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary px-4">Criar operação</Link>} />;
 
   const selectedStatus = selected ? statusOf(selected) : null;
   const location = selected ? cityName(selected) : '';
@@ -510,10 +509,10 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Talentos</h1>
-            <p className="mt-1 text-sm leading-6 text-gray-600">Encontre, convide e contrate profissionais para suas demandas.</p>
+            <p className="mt-1 text-sm leading-6 text-gray-600">Encontre, convide e contrate profissionais para suas operações.</p>
           </div>
           {demands.length > 0 && <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-gray-500">
-            Demanda
+            Operação
             <Select value={demandId} onChange={(event) => {
               setDemandId(event.target.value);
               const url = new URL(window.location.href);
@@ -541,7 +540,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         </div>}
 
         <div className="flex items-center justify-between gap-3 border-b border-gray-200">
-          <div role="tablist" aria-label="Talentos da demanda" className="-mb-px flex min-w-0 gap-1 overflow-x-auto">
+          <div role="tablist" aria-label="Talentos da operação" className="-mb-px flex min-w-0 gap-1 overflow-x-auto">
             {tabs.map((item) => <Button key={item.id} type="button" role="tab" aria-selected={tab === item.id} variant="ghost"
               onClick={() => setTab(item.id)}
               className={`shrink-0 rounded-none border-b-2 px-3 py-2 text-sm font-semibold ${tab === item.id ? 'border-orange-700 text-orange-800' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
@@ -567,7 +566,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
                 : <div className="space-y-6">
                   {full && <div role="status" className="ec-card border-emerald-200 bg-emerald-50 p-4">
                     <p className="font-semibold text-emerald-900">✅ Equipe completa</p>
-                    <p className="mt-1 text-sm text-emerald-900/80">Todas as vagas desta demanda já foram preenchidas.</p>
+                    <p className="mt-1 text-sm text-emerald-900/80">Todas as vagas desta operação já foram preenchidas.</p>
                   </div>}
                   {tab !== 'candidates' && invitedSection}
                   {tab === 'all' && <hr className="border-gray-200" />}
@@ -676,9 +675,9 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
             </div>
           </div>
           <div className="space-y-2 border-t border-gray-200 p-4">
-            {current && full && <p role="status" className="text-sm text-gray-700"><b>Equipe já formada.</b> Esta demanda não está mais recebendo novas contratações.</p>}
+            {current && full && <p role="status" className="text-sm text-gray-700"><b>Equipe já formada.</b> Esta operação não está mais recebendo novas contratações.</p>}
             {current && !full && selectedStatus && selectedStatus !== 'candidate' && <p role="status" className="text-sm font-semibold text-gray-700">{demandStatusLabels[selectedStatus]}</p>}
-            {!current && <p className="text-sm text-gray-600">Crie uma demanda para convidar este profissional.</p>}
+            {!current && <p className="text-sm text-gray-600">Crie uma operação para convidar este profissional.</p>}
             <div className="flex gap-2">
               {selectedRelationship && <Button variant="secondary" aria-label={selectedRelationship.aria} onClick={selectedRelationship.run} disabled={busy !== ''} className="flex-1 px-3">{selectedRelationship.label}</Button>}
               {current && !full && (selectedStatus === 'candidate' || selectedStatus === 'accepted')

@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import LogoutButton from '@/app/components/logout-button';
 import OperationalReputationView from '@/app/components/operational-reputation';
+import { DashboardLogo } from '@/app/components/dashboard-identity';
 
 interface UserProfile {
   name: string;
@@ -58,7 +59,7 @@ export default function ProfilePage() {
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28 sm:px-6 sm:py-10 md:pb-10">
       <section className="mx-auto max-w-xl space-y-6">
         <header>
-          <p className="text-sm font-semibold text-orange-700">ExtraChef</p>
+          <DashboardLogo role={profile?.role} />
           <h1 className="mt-1 text-2xl font-bold text-gray-950">Perfil</h1>
         </header>
 

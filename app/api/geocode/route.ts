@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
   const location = { ...emptyWorkLocation };
   for (const field of ['address', 'number', 'neighborhood', 'city', 'state', 'postal_code', 'location_name'] as const) {
     const value = fields[field];
+    if (field === 'postal_code' && value === undefined) continue;
     if (typeof value !== 'string') {
       return reply({ error: 'Endereço inválido.' }, 400);
     }

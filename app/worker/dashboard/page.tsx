@@ -5,7 +5,8 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
-import CommunicationNavigation from '@/app/components/communication-navigation';
+import NotificationBell from '@/app/components/notification-bell';
+import { DashboardAvatar, DashboardLogo } from '@/app/components/dashboard-identity';
 import { getDeviceCoordinates, type DeviceCoordinates } from '@/lib/geolocation';
 import { distanceMeters, estimatedDistance } from '@/lib/work-location';
 import { loadPendingReviews, type PendingReview } from '@/lib/operations';
@@ -56,9 +57,10 @@ interface WorkerStats {
 export default function WorkerDashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
-  const [profile, setProfile] = useState<{ name: string; city: string | null; score: number | null } | null>(null);
+  const [profile, setProfile] = useState<{ name: string } | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<WorkerStats | null>(null);
-  const [estimatedEarnings, setEstimatedEarnings] = useState<number | null>(null);
+  const [estimatedEarnings, setEstimatedEarnings] = useState(0);
   const [loading, setLoading] = useState(true);
   const [signedIn, setSignedIn] = useState(true);
   const [applyingId, setApplyingId] = useState<string | null>(null);
@@ -72,7 +74,6 @@ export default function WorkerDashboardPage() {
   const [pageError, setPageError] = useState('');
   const [profileError, setProfileError] = useState('');
   const [statsError, setStatsError] = useState('');
-  const [earningsError, setEarningsError] = useState('');
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [reviewsError, setReviewsError] = useState('');
   const [reviewsReady, setReviewsReady] = useState(false);
@@ -97,11 +98,13 @@ export default function WorkerDashboardPage() {
           setPendingReviews(pending);
           setReviewsReady(true);
         } catch (error) {
-          if (isMounted) setReviewsError(error instanceof Error ? error.message : 'Não foi possível conferir as avaliações pendentes.');
+          console.error('Worker pending reviews lookup failed.', error);
+          if (isMounted) setReviewsError('Não foi possível conferir as avaliações pendentes.');
         }
 
-        const [profileResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
-          supabase.from('public_user_directory').select('name, city, score').eq('id', userId).single(),
+        const [profileResult, profilePhotoResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
+          supabase.from('public_user_directory').select('name').eq('id', userId).single(),
+          supabase.from('worker_profiles').select('profile_photo_path').eq('user_id', userId).maybeSingle(),
           supabase.from('applications').select('job_id').eq('worker_id', userId),
           supabase
             .from('jobs')
@@ -114,35 +117,54 @@ export default function WorkerDashboardPage() {
 
         if (!isMounted) return;
 
-        if (profileResult.error) setProfileError(`Não foi possível carregar seus dados profissionais: ${profileResult.error.message}`);
-        else if (profileResult.data) setProfile(profileResult.data);
-        else setProfileError('Não foi possível carregar seus dados profissionais.');
+        if (profileResult.error) {
+          console.error('Worker profile lookup failed.', profileResult.error);
+          setProfileError('Não foi possível carregar seus dados profissionais.');
+        } else if (profileResult.data) {
+          setProfile(profileResult.data);
+        } else {
+          setProfileError('Não foi possível carregar seus dados profissionais.');
+        }
+        if (profilePhotoResult.error) {
+          console.error('Worker profile photo lookup failed.', profilePhotoResult.error);
+        } else if (profilePhotoResult.data?.profile_photo_path) {
+          const { data: signedPhoto, error: photoError } = await supabase.storage
+            .from('worker-private')
+            .createSignedUrl(profilePhotoResult.data.profile_photo_path, 60 * 10);
+          if (photoError) console.error('Worker profile photo signing failed.', photoError);
+          else if (isMounted && signedPhoto?.signedUrl) setPhotoUrl(signedPhoto.signedUrl);
+        }
         if (applicationsResult.error) {
-          setApplicationsError(`Não foi possível verificar suas candidaturas: ${applicationsResult.error.message}`);
+          console.error('Worker applications lookup failed.', applicationsResult.error);
+          setApplicationsError('Não foi possível verificar suas candidaturas.');
         } else if (applicationsResult.data) {
           setAppliedJobIds(applicationsResult.data.map((application) => application.job_id));
         }
         if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
-        if (jobsResult.error) setJobsError(`Não foi possível carregar as vagas: ${jobsResult.error.message}`);
+        if (jobsResult.error) {
+          console.error('Worker job listings lookup failed.', jobsResult.error);
+          setJobsError('Não foi possível carregar as vagas.');
+        }
         if (statsResult.error) {
-          setStatsError(`Não foi possível carregar seu resumo: ${statsResult.error.message}`);
+          console.error('Worker dashboard stats lookup failed.', statsResult.error);
+          setStatsError('Não foi possível carregar seu resumo profissional.');
         } else {
           const result = (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) as WorkerStats | null;
           if (result) setStats(result);
           else setStatsError('O resumo profissional não retornou dados.');
         }
         if (earningsResult.error) {
-          setEarningsError(`Não foi possível carregar os ganhos estimados: ${earningsResult.error.message}`);
-        } else if (earningsResult.data !== null) {
-          setEstimatedEarnings(Number(earningsResult.data));
+          console.error('Worker estimated earnings lookup failed.', earningsResult.error);
         } else {
-          setEarningsError('Os ganhos estimados não retornaram dados.');
+          const monthlyEarnings = Number(earningsResult.data ?? 0);
+          setEstimatedEarnings(Number.isFinite(monthlyEarnings) ? monthlyEarnings : 0);
         }
 
         setLoading(false);
       } catch (error) {
         if (isMounted) {
-          setPageError(error instanceof Error ? error.message : 'Não foi possível carregar o painel.');
+          console.error('Worker dashboard load failed.', error);
+          setPageError('Não foi possível carregar o painel profissional.');
           setLoading(false);
         }
       }
@@ -153,6 +175,14 @@ export default function WorkerDashboardPage() {
       isMounted = false;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (feedbackMessage !== 'Candidatura enviada com sucesso.') return;
+    const timeout = window.setTimeout(() => {
+      setFeedbackMessage((current) => current === 'Candidatura enviada com sucesso.' ? '' : current);
+    }, 9000);
+    return () => window.clearTimeout(timeout);
+  }, [feedbackMessage]);
 
   const handleApply = async (jobId: string) => {
     if (applyingId) return;
@@ -176,9 +206,10 @@ export default function WorkerDashboardPage() {
     });
 
     if (error) {
+      console.error('Worker application submission failed.', { code: error.code });
       setFeedbackMessage(error.code === '23505'
         ? 'Você já se candidatou a esta vaga.'
-        : `Não foi possível enviar a candidatura: ${error.message}`);
+        : 'Não foi possível enviar sua candidatura. Tente novamente.');
       if (error.code === '23505') setAppliedJobIds((current) => [...new Set([...current, jobId])]);
     } else {
       setFeedbackMessage('Candidatura enviada com sucesso.');
@@ -231,74 +262,50 @@ export default function WorkerDashboardPage() {
   }
 
   const metricCards = [
-    ...(stats ? [
-      { label: 'Candidaturas', value: stats.total_applications, detail: 'Enviadas até agora', accent: 'border-l-orange-500' },
-      { label: 'Diárias concluídas', value: stats.completed_jobs, detail: 'Serviços finalizados', accent: 'border-l-blue-600' },
-      ...(stats.average_rating > 0 ? [
-        { label: 'Avaliação média', value: stats.average_rating.toFixed(2), detail: 'Notas recebidas', accent: 'border-l-amber-500' },
-      ] : []),
-    ] : []),
-    ...(estimatedEarnings !== null
-      ? [{ label: 'Ganhos estimados', value: `R$ ${estimatedEarnings.toFixed(2)}`, detail: 'Diárias concluídas; não confirma pagamento', accent: 'border-l-teal-600' }]
-      : []),
+    { label: 'Candidaturas', value: stats?.total_applications ?? '—' },
+    { label: 'Diárias concluídas', value: stats?.completed_jobs ?? '—' },
+    { label: 'Ganhos estimados', value: `R$ ${estimatedEarnings.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 min-h-16 flex flex-wrap gap-3 py-2 items-center justify-between">
-          <div className="font-bold text-xl text-orange-600">🍳 ExtraChef</div>
-          <CommunicationNavigation role="worker" />
-          <div className="flex items-center gap-3">
-            <Link href="/worker/applications" className="hidden text-sm font-medium text-gray-700 hover:text-orange-600 md:inline-flex">
-              Minhas Candidaturas
-            </Link>
-            
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-6xl space-y-6 px-4 py-5 pb-28 sm:p-6 md:pb-6">
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Olá, {profile?.name || 'Profissional'}</h1>
-            <p className="text-sm text-gray-500">Explore e candidate-se aos plantões temporários disponíveis.</p>
-          </div>
-          <div className="bg-gray-50 p-3 rounded-xl border">
-            <div>
-              <span className="block text-[10px] text-gray-400 font-bold uppercase">Cidade</span>
-              <span className="text-base font-bold text-gray-800">📍 {profile?.city || 'Não informada'}</span>
+    <>
+      <main className="min-h-screen bg-white text-gray-950">
+        <header className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12">
+          <div className="mb-8 flex items-center justify-between">
+            <DashboardLogo role="worker" />
+            <div className="flex items-center gap-3">
+              <NotificationBell iconOnly />
+              <DashboardAvatar role="worker" name={profile?.name || ''} photoUrl={photoUrl} onImageError={() => {
+                  setPhotoUrl(null);
+                  setPageError('Não foi possível exibir sua foto de perfil.');
+                }} />
             </div>
           </div>
-        </div>
+          <h1 className="break-words text-[1.75rem] font-semibold leading-tight tracking-[-0.045em] sm:text-4xl">Bem-vindo 👋</h1>
+          <p className="mt-2 break-words text-lg font-semibold text-gray-900">{profile?.name || 'Profissional'}</p>
+          <p className="mt-2 text-sm text-gray-500 sm:text-base">Encontre operações e acompanhe suas candidaturas.</p>
+        </header>
+
+        <section aria-label="Resumo profissional" className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-2 px-4 pt-10 sm:gap-4 sm:px-6 lg:grid-cols-4">
+          {metricCards.map((card) => <article key={card.label} className="flex min-h-32 min-w-0 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 sm:p-5">
+            <p className={`break-words font-semibold tabular-nums ${card.value === '—' ? 'text-sm text-gray-500' : 'text-2xl sm:text-3xl'}`}>{card.value}</p>
+            <p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">{card.label}</p>
+          </article>)}
+          <OperationalReputationView summary />
+        </section>
+
+        <section className="mx-auto max-w-6xl space-y-10 px-4 py-8 pb-[calc(12rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-6 sm:pb-[calc(12rem+env(safe-area-inset-bottom))]">
 
         {pageError && <Toast tone="error">{pageError}</Toast>}
         {profileError && <Toast tone="error">{profileError}</Toast>}
         {applicationsError && <Toast tone="error">{applicationsError}</Toast>}
         {statsError && <Toast tone="error">{statsError}</Toast>}
-        {earningsError && <Toast tone="error">{earningsError}</Toast>}
         {reviewsError && <Toast tone="error">{reviewsError}</Toast>}
         {pendingReviews.length > 0 && <section className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5">
           <h2 className="text-lg font-semibold">Avaliação pendente</h2>
           <p className="text-sm text-gray-600">Antes de se candidatar novamente, avalie sua última experiência.</p>
           {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
         </section>}
-        <Link href="/worker/applications" className="ec-button ec-button--primary w-full px-4">Acompanhar minhas operações</Link>
-
-        <section aria-label="Resumo profissional" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {metricCards.map((card) => (
-            <article key={card.label} className={`min-h-32 rounded-lg border border-gray-200 border-l-4 ${card.accent} bg-white p-5 shadow-sm`}>
-              <p className="text-sm font-medium text-gray-600">{card.label}</p>
-              <p className="mt-3 text-3xl font-bold tabular-nums text-gray-950">{card.value}</p>
-              <p className="mt-1 text-xs text-gray-500">{card.detail}</p>
-            </article>
-          ))}
-        </section>
-        <details>
-          <summary className="cursor-pointer py-3 text-sm font-semibold">Minha confiança operacional</summary>
-          <OperationalReputationView />
-        </details>
-
         <section id="historico" className="space-y-4">
           <div>
             <h2 className="text-xl font-bold text-gray-950">Histórico de trabalhos</h2>
@@ -336,14 +343,16 @@ export default function WorkerDashboardPage() {
 
         <div id="vagas" className="space-y-4">
           <h2 className="text-xl font-bold text-gray-900">Vagas Abertas</h2>
-          <Button disabled={locating} busy={locating} onClick={() => {
-            setLocating(true); setLocationError('');
-            void getDeviceCoordinates().then(setWorkerLocation).catch((error: unknown) => {
-              setLocationError(error instanceof Error ? error.message : 'Não foi possível obter sua localização.');
-            }).finally(() => setLocating(false));
-          }}>Mostrar distâncias estimadas (opcional)</Button>
-          <p className="text-sm text-gray-600">Localização opcional, usada apenas para distância em linha reta. Não limita vagas ou candidaturas.</p>
-          {locationError && <Toast tone="error">{locationError} Você pode continuar se candidatando normalmente.</Toast>}
+          <div className="hidden" aria-hidden="true">
+            <Button disabled={locating} busy={locating} onClick={() => {
+              setLocating(true); setLocationError('');
+              void getDeviceCoordinates().then(setWorkerLocation).catch((error: unknown) => {
+                setLocationError(error instanceof Error ? error.message : 'Não foi possível obter sua localização.');
+              }).finally(() => setLocating(false));
+            }}>Mostrar distâncias estimadas (opcional)</Button>
+            <p className="text-sm text-gray-600">Localização opcional, usada apenas para distância em linha reta. Não limita vagas ou candidaturas.</p>
+            {locationError && <Toast tone="error">{locationError} Você pode continuar se candidatando normalmente.</Toast>}
+          </div>
 
           {feedbackMessage && (
             <Toast tone="info">{feedbackMessage}</Toast>
@@ -364,7 +373,7 @@ export default function WorkerDashboardPage() {
                     key={job.id}
                     className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
                   >
-                    <div className="space-y-2 flex-1">
+                    <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex items-center gap-3">
                         <h3 className="text-lg font-bold text-gray-900">{job.title}</h3>
                         <Badge tone="success">
@@ -372,8 +381,8 @@ export default function WorkerDashboardPage() {
                         </Badge>
                       </div>
 
-                      <p className="text-sm text-gray-600">{job.description}</p>
-                      {job.work_address && <p className="text-sm text-gray-700">{job.location_name} · {job.work_address} {job.work_number} · {job.work_city}/{job.work_state}</p>}
+                      <p className="break-words text-sm text-gray-600">{job.description}</p>
+                      {job.work_address && <p className="break-words text-sm text-gray-700">{job.location_name} · {job.work_address} {job.work_number} · {job.work_city}/{job.work_state}</p>}
                       {workerLocation && job.work_latitude !== null && job.work_longitude !== null && (
                         <p className="text-sm font-semibold text-gray-700">📍 Distância estimada: {estimatedDistance(distanceMeters(
                           workerLocation.latitude, workerLocation.longitude, job.work_latitude, job.work_longitude,
@@ -420,8 +429,9 @@ export default function WorkerDashboardPage() {
             </div>
           )}
         </div>
+        </section>
       </main>
-      <MobileBottomNav role="worker" />
-    </div>
+      <MobileBottomNav role="worker" showOnDesktop />
+    </>
   );
 }

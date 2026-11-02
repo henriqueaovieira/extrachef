@@ -142,10 +142,10 @@ test('detail helpers deduplicate latest candidates, calculate exact progress and
 test('detail shows real people, hides unnecessary reserve and counters, and requires hiring confirmation', async () => {
   const app = mount(detailFile);
   try {
-    app.render(); assert.match(app.html(), /Carregando demanda/);
+    app.render(); assert.match(app.html(), /Carregando operação/);
     await app.flush();
     const html = app.html();
-    for (const text of ['Informações da Demanda', 'Candidatos recentes', 'Equipe contratada', 'Linha do tempo', 'Uniforme preto', 'R$ 150,00', 'Profissional h1', 'Profissional h2', '4,7 / 5', 'Contratar', 'Pagamento', 'Check-in', 'Checkout']) assert.ok(html.includes(text), text);
+    for (const text of ['Informações da Operação', 'Candidatos recentes', 'Equipe contratada', 'Linha do tempo', 'Uniforme preto', 'R$ 150,00', 'Profissional h1', 'Profissional h2', '4,7 / 5', 'Contratar', 'Pagamento', 'Check-in', 'Checkout']) assert.ok(html.includes(text), text);
     assert.doesNotMatch(html, /posições preenchidas|<progress|id="reserve-heading"|Adicionar à reserva/);
     const recent = html.split('id="candidates-heading"')[1].split('aria-labelledby="hired-heading"')[0];
     for (const id of ['c4', 'c3', 'c2']) assert.ok(recent.includes(`Profissional ${id}`));
@@ -168,7 +168,7 @@ test('detail failures remain explicit and optional history/profile failure never
     const app = mount(detailFile, options);
     try {
       await app.flush();
-      if (options.coreFailure) { assert.match(app.html(), /Não foi possível carregar esta demanda/); assert.ok(app.find('Tentar Novamente')); }
+      if (options.coreFailure) { assert.match(app.html(), /Não foi possível carregar esta operação/); assert.ok(app.find('Tentar Novamente')); }
       else {
         assert.match(app.html(), /Não foi possível carregar a linha do tempo/);
         assert.match(app.html(), /Não foi possível carregar os perfis/);
