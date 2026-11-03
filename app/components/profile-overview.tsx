@@ -91,12 +91,9 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
                 ['RG', data.rg],
                 ['Nascimento', new Date(`${data.date_of_birth}T00:00:00`).toLocaleDateString('pt-BR')],
                 ['Telefone', data.phone],
-                ['WhatsApp', data.whatsapp],
                 ['Endereço', `${data.address}, ${data.city} - ${data.state}, ${data.postal_code}`],
                 ['Experiência', data.experience || 'Não informada'],
                 ['Especialidades', (data.specialties ?? []).join(', ') || 'Não informadas'],
-                ['Certificados', `${(data.certificates ?? []).length} arquivo(s)`],
-                ['Currículo', data.resume_pdf_path ? 'PDF enviado' : 'Não enviado'],
                 ['Selfie', data.selfie_verification_path ? 'Enviada' : 'Não enviada'],
               ],
             });

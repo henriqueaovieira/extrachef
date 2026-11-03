@@ -25,9 +25,7 @@ interface WorkerProfile {
   bio: string;
   experience: string;
   specialties: string;
-  certificates: string[];
   profile_photo_path: string;
-  resume_pdf_path: string;
   selfie_verification_path: string;
 }
 
@@ -59,9 +57,7 @@ const emptyWorkerProfile: WorkerProfile = {
   bio: '',
   experience: '',
   specialties: '',
-  certificates: [],
   profile_photo_path: '',
-  resume_pdf_path: '',
   selfie_verification_path: '',
 };
 
@@ -82,7 +78,6 @@ const emptyRestaurantProfile: RestaurantProfile = {
 
 
 function getFileExtension(file: File) {
-  if (file.type === 'application/pdf') return 'pdf';
   if (file.type === 'image/png') return 'png';
   if (file.type === 'image/webp') return 'webp';
   return 'jpg';
@@ -95,9 +90,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
   const [workerProfile, setWorkerProfile] = useState<WorkerProfile>(emptyWorkerProfile);
   const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfile>(emptyRestaurantProfile);
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
-  const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
-  const [certificateFiles, setCertificateFiles] = useState<File[]>([]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [companyPhotoFiles, setCompanyPhotoFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,7 +133,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       if (role === 'worker') {
         const { data, error } = await supabase
           .from('worker_profiles')
-          .select('cpf, rg, date_of_birth, phone, whatsapp, address, city, state, postal_code, bio, experience, specialties, certificates, profile_photo_path, resume_pdf_path, selfie_verification_path')
+          .select('cpf, rg, date_of_birth, phone, whatsapp, address, city, state, postal_code, bio, experience, specialties, profile_photo_path, selfie_verification_path')
           .eq('user_id', userIdValue)
           .maybeSingle();
         if (error) setErrorMessage(error.message);
@@ -149,7 +142,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
             ...emptyWorkerProfile,
             ...data,
             specialties: (data.specialties ?? []).join(', '),
-            certificates: Array.isArray(data.certificates) ? data.certificates : [],
           });
         } else {
           setWorkerProfile((current) => ({ ...current, city: user.city ?? '' }));
@@ -182,9 +174,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
   }, [role, supabase]);
 
   const uploadFile = async (file: File, bucket: string, category: string) => {
-    const allowedTypes = bucket === 'worker-private'
-      ? ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-      : ['image/jpeg', 'image/png', 'image/webp'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
     if (!allowedTypes.includes(file.type)) throw new Error('Formato de arquivo não permitido.');
     if (file.size > 10 * 1024 * 1024) throw new Error('Cada arquivo deve ter no máximo 10 MB.');
 
@@ -196,10 +186,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
     });
     if (error) throw new Error(error.message);
     return data.path;
-  };
-
-  const handleCertificates = (event: ChangeEvent<HTMLInputElement>) => {
-    setCertificateFiles(Array.from(event.target.files ?? []));
   };
 
   const handleCompanyPhotos = (event: ChangeEvent<HTMLInputElement>) => {
@@ -224,21 +210,18 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
     setSaving(true);
     try {
       if (role === 'worker') {
-        const [profilePhotoPath, resumePdfPath, selfiePath, uploadedCertificates] = await Promise.all([
+        const [profilePhotoPath, selfiePath] = await Promise.all([
           profilePhotoFile ? uploadFile(profilePhotoFile, 'worker-private', 'profile-photo') : Promise.resolve(workerProfile.profile_photo_path || null),
-          resumeFile ? uploadFile(resumeFile, 'worker-private', 'resume') : Promise.resolve(workerProfile.resume_pdf_path || null),
           selfieFile ? uploadFile(selfieFile, 'worker-private', 'selfie') : Promise.resolve(workerProfile.selfie_verification_path || null),
-          Promise.all(certificateFiles.map((file) => uploadFile(file, 'worker-private', 'certificate'))),
         ]);
 
+        // Keep the legacy NOT NULL value; this field is no longer editable by workers.
         const { error } = await supabase.from('worker_profiles').upsert({
           user_id: userId,
           ...workerProfile,
           cpf: normalizeDocument(workerProfile.cpf),
           specialties: workerProfile.specialties.split(',').map((item) => item.trim()).filter(Boolean),
-          certificates: [...workerProfile.certificates, ...uploadedCertificates],
           profile_photo_path: profilePhotoPath,
-          resume_pdf_path: resumePdfPath,
           selfie_verification_path: selfiePath,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
@@ -253,9 +236,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
         setWorkerProfile((current) => ({
           ...current,
           profile_photo_path: profilePhotoPath ?? '',
-          resume_pdf_path: resumePdfPath ?? '',
           selfie_verification_path: selfiePath ?? '',
-          certificates: [...current.certificates, ...uploadedCertificates],
         }));
       } else {
         const [logoPath, uploadedPhotos] = await Promise.all([
@@ -287,9 +268,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       }
       setSuccessMessage('Perfil salvo com sucesso.');
       setProfilePhotoFile(null);
-      setResumeFile(null);
       setSelfieFile(null);
-      setCertificateFiles([]);
       setLogoFile(null);
       setCompanyPhotoFiles([]);
     } catch (error) {
@@ -360,7 +339,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
         <ProfileProgress progress={getProfileProgress(role, role === 'worker' ? accountName : restaurantProfile.trade_name, role === 'worker' ? {
           ...workerProfile,
           profile_photo_path: profilePhotoFile ? 'selected' : workerProfile.profile_photo_path,
-          resume_pdf_path: resumeFile ? 'selected' : workerProfile.resume_pdf_path,
         } : {
           ...restaurantProfile,
           logo_path: logoFile ? 'selected' : restaurantProfile.logo_path,
@@ -377,7 +355,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 {input('RG', workerProfile.rg, (value) => updateWorker('rg', value), { autoComplete: 'off' })}
                 {input('Data de nascimento', workerProfile.date_of_birth, (value) => updateWorker('date_of_birth', value), { type: 'date', autoComplete: 'bday' })}
                 {input('Telefone', workerProfile.phone, (value) => updateWorker('phone', value), { type: 'tel', inputMode: 'tel', autoComplete: 'tel' })}
-                {input('WhatsApp', workerProfile.whatsapp, (value) => updateWorker('whatsapp', value), { type: 'tel', inputMode: 'tel' })}
                 {input('CEP', workerProfile.postal_code, (value) => updateWorker('postal_code', value), { inputMode: 'numeric', autoComplete: 'postal-code' })}
                 {input('Cidade', workerProfile.city, (value) => updateWorker('city', value), { autoComplete: 'address-level2' })}
                 {input('Estado', workerProfile.state, (value) => updateWorker('state', value), { autoComplete: 'address-level1', maxLength: 2 })}
@@ -393,12 +370,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 <CameraCapture label="foto de perfil" onCapture={setProfilePhotoFile} />
                 {fileInput('Selfie de verificação', 'image/jpeg,image/png,image/webp', setSelfieFile, workerProfile.selfie_verification_path, 'user')}
                 <CameraCapture label="selfie de verificação" onCapture={setSelfieFile} />
-                {fileInput('Currículo em PDF', 'application/pdf', setResumeFile, workerProfile.resume_pdf_path)}
-                <label className="block space-y-2">
-                  <span className="text-sm font-medium text-gray-700">Certificados (PDF ou imagem)</span>
-                  <TextInput type="file" accept="application/pdf,image/jpeg,image/png,image/webp" multiple onChange={handleCertificates} className="w-full" />
-                  <span className="text-xs text-gray-500">{workerProfile.certificates.length} arquivo(s) salvo(s); até 10 MB por arquivo.</span>
-                </label>
               </div>
             </>
           ) : (

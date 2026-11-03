@@ -36,6 +36,19 @@ cada caso: `confirmation_expired`/`confirmation_invalid` no cadastro e
 `recovery_expired`/`recovery_invalid` na recuperação. Nos casos de recuperação,
 o login já abre em **Recuperar senha** para pedir um novo link.
 
+## Perfil profissional
+
+WhatsApp, currículo e certificados não fazem parte da experiência do
+profissional: não aparecem na visualização, edição, uploads, completude ou
+verificação. Telefone, identidade, especialidades, Perfil Verificado e Confiança
+Operacional permanecem. As colunas `worker_profiles.whatsapp`, `resume_pdf_path`
+e `certificates` e os uploads históricos são preservados, sem novas migrations.
+O editor não lê nem grava os campos dos arquivos antigos. O WhatsApp histórico
+é mantido internamente para compatibilidade com a coluna `NOT NULL`; novos
+perfis salvam uma string vazia, sem input ou validação desse campo.
+O WhatsApp do restaurante permanece inalterado.
+
+
 ## Home do contratante
 
 A rota `/restaurant/dashboard` funciona como Central Operacional mobile first:

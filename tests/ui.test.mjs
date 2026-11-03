@@ -86,11 +86,201 @@ test('document masks limit digits without changing their order', () => {
   assert.equal(formatInput('01310930123', 'postal-code'), '01310-930');
 });
 
+test('worker profile hides retired fields while keeping identity and restaurant contact', () => {
+  const overview = readFileSync(new URL('../app/components/profile-overview.tsx', import.meta.url), 'utf8');
+  const workerDetails = overview.slice(overview.indexOf('details: ['), overview.indexOf('} else {'));
+  for (const label of ['CPF', 'RG', 'Nascimento', 'Telefone', 'Endereço', 'Experiência', 'Especialidades']) {
+    assert.ok(workerDetails.includes(`['${label}',`), `Worker overview keeps ${label}`);
+  }
+  for (const label of ['WhatsApp', 'Currículo', 'Certificados']) {
+    assert.ok(!workerDetails.includes(`['${label}',`), `Worker overview hides ${label}`);
+  }
+  assert.match(overview, /role === 'worker' && <div id="confidence"><OperationalReputationView \/>/);
+  assert.match(overview.slice(overview.indexOf('} else {')), /\['WhatsApp', data.whatsapp\]/);
+
+  const editor = readFileSync(new URL('../app/components/profile-editor.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(editor, /input\('WhatsApp', workerProfile.whatsapp/);
+  assert.doesNotMatch(editor, /curr[ií]cul|resume|certificate|certificado|application\/pdf/i);
+  assert.match(editor, /input\('Telefone', workerProfile.phone/);
+  assert.match(editor, /input\('WhatsApp', restaurantProfile.whatsapp/);
+  for (const file of ['../app/privacy/page.tsx', '../lib/ui/profile-progress.ts']) {
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), 'utf8'), /whatsapp|resume|curriculum|certificate|curr[ií]culo|certificado/i);
+  }
+});
+
+async function mountProfileEditor({ role = 'worker', existing = true, saveError = null } = {}) {
+  const React = require('react');
+  const states = [], effects = [], calls = [];
+  let cursor = 0, tree;
+  const historical = {
+    whatsapp: 'legacy-contact',
+    resume_pdf_path: 'worker/legacy-document.pdf',
+    certificates: ['worker/legacy-certificate.pdf'],
+  };
+  let stored = existing ? {
+    cpf: '52998224725', rg: 'RG', date_of_birth: '1990-01-01', phone: '11999999999',
+    address: 'Street', city: 'City', state: 'SP', postal_code: '01000000',
+    bio: '', experience: '', specialties: ['Cozinha'], profile_photo_path: 'worker/photo.jpg',
+    cnpj: '11222333000181', legal_name: 'Restaurant', trade_name: 'Restaurant',
+    description: '', logo_path: '', company_photos: [],
+    ...historical,
+  } : null;
+  const client = {
+    auth: { getUser: async () => ({ data: { user: { id: 'worker' } }, error: null }) },
+    from(table) {
+      return {
+        select(columns) {
+          calls.push({ kind: 'select', table, columns });
+          return {
+            eq() { return this; },
+            async single() { return { data: { name: 'Name', role, city: 'City' }, error: null }; },
+            async maybeSingle() {
+              const data = !stored ? null : columns === '*' ? stored
+                : Object.fromEntries(columns.split(', ').map((field) => [field, stored[field]]));
+              return { data, error: null };
+            },
+          };
+        },
+        async upsert(payload, options) {
+          calls.push({ kind: 'upsert', table, payload, options });
+          if (!saveError) stored = { ...stored, ...payload };
+          return { error: saveError };
+        },
+      };
+    },
+    async rpc(name, args) {
+      calls.push({ kind: 'rpc', name, args });
+      return { error: null };
+    },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(path, file) {
+            calls.push({ kind: 'upload', bucket, path, file });
+            return { data: { path }, error: null };
+          },
+          async remove() { assert.fail('Editing a profile must not delete historical uploads'); },
+        };
+      },
+    },
+  };
+  const Camera = () => null;
+  const Component = loadTs('../app/components/profile-editor.tsx', {
+    react: {
+      ...React,
+      useState(initial) {
+        const index = cursor++;
+        if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
+        return [states[index], (value) => {
+          states[index] = typeof value === 'function' ? value(states[index]) : value;
+        }];
+      },
+      useEffect(callback) { if (!effects.length) effects.push(callback); },
+    },
+    '@/app/components/ui': ui,
+    '@/lib/supabase/client': { createClient: () => client },
+    '@/app/components/camera-capture': { default: Camera },
+    '@/lib/validations/br-documents': loadTs('../lib/validations/br-documents.ts'),
+    '@/lib/ui/profile-progress': { getProfileProgress },
+    '@/app/components/profile-progress': loadTs('../app/components/profile-progress.tsx', { '@/app/components/ui': ui }),
+    '@/app/components/dashboard-identity': { DashboardLogo: () => null },
+    'next/link': { default: ({ children, ...props }) => createElement('a', props, children) },
+  }).default;
+  const render = () => {
+    cursor = 0;
+    tree = Component({ role });
+    return renderToStaticMarkup(tree);
+  };
+  function elements(node) {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node)) return node.flatMap(elements);
+    return [node, ...elements(node.props?.children)];
+  }
+  render();
+  effects[0]();
+  await new Promise((resolve) => setImmediate(resolve));
+  render();
+  return {
+    calls, historical, render, stored: () => stored,
+    files: () => elements(tree).filter((node) => node.props?.type === 'file'),
+    async save() {
+      await elements(tree).find((node) => node.type === 'form').props.onSubmit({ preventDefault() {} });
+      return render();
+    },
+    fill(label, value) {
+      const field = elements(tree).find((node) => node.type === 'label'
+        && elements(node.props.children).some((child) => child.type === 'span' && child.props.children === label));
+      assert.ok(field, `Missing field: ${label}`);
+      const control = elements(field.props.children).find((node) => node.props?.onValueChange || node.props?.onChange);
+      if (control.props.onValueChange) control.props.onValueChange(value);
+      else control.props.onChange({ target: { value } });
+      render();
+    },
+  };
+}
+
+test('rendered worker editor hides retired data and saving preserves historical fields and uploads', async () => {
+  const editor = await mountProfileEditor();
+  const markup = editor.render();
+  assert.doesNotMatch(markup, /whatsapp|resume|curriculum|certificate|curr[ií]culo|certificado|Não enviado|arquivo\(s\)|legacy-/i);
+  for (const label of ['CPF', 'RG', 'Data de nascimento', 'Telefone', 'Endereço', 'Especialidades', 'Selfie de verificação']) {
+    assert.ok(markup.includes(label), `Keeps ${label}`);
+  }
+  assert.match(markup, /100% preenchido/);
+  assert.equal(editor.files().length, 2);
+  assert.equal(editor.files()[0].props.accept, 'image/jpeg,image/png,image/webp');
+  editor.fill('Telefone', '11888888888');
+  assert.match(await editor.save(), /Perfil salvo com sucesso/);
+  const saved = editor.calls.find((call) => call.kind === 'upsert');
+  assert.equal(saved.table, 'worker_profiles');
+  assert.equal(saved.payload.phone, '11888888888');
+  assert.equal(saved.payload.whatsapp, editor.historical.whatsapp);
+  for (const key of ['resume_pdf_path', 'certificates']) {
+    assert.equal(Object.hasOwn(saved.payload, key), false);
+    assert.deepEqual(editor.stored()[key], editor.historical[key]);
+  }
+  assert.equal(editor.calls.some((call) => call.kind === 'upload'), false);
+});
+
+test('new worker profile saves without retired inputs and restricts photo uploads to images', async () => {
+  const editor = await mountProfileEditor({ existing: false });
+  for (const [label, value] of [
+    ['CPF', '52998224725'], ['RG', 'RG'], ['Data de nascimento', '1990-01-01'],
+    ['Telefone', '11999999999'], ['CEP', '01000000'], ['Estado', 'SP'],
+    ['Endereço', 'Street'], ['Especialidades (separadas por vírgula)', 'Cozinha'],
+  ]) editor.fill(label, value);
+  const fileInput = editor.files()[0];
+  fileInput.props.onChange({ target: { files: [{ type: 'application/pdf', size: 10 }] } });
+  editor.render();
+  assert.match(await editor.save(), /Formato de arquivo não permitido/);
+  assert.equal(editor.calls.some((call) => call.kind === 'upload' || call.kind === 'upsert'), false);
+  fileInput.props.onChange({ target: { files: [{ type: 'image/jpeg', size: 10 }] } });
+  editor.render();
+  assert.match(await editor.save(), /Perfil salvo com sucesso/);
+  const saved = editor.calls.find((call) => call.kind === 'upsert');
+  assert.equal(saved.payload.whatsapp, '');
+  assert.equal(Object.hasOwn(saved.payload, 'resume_pdf_path'), false);
+  assert.equal(Object.hasOwn(saved.payload, 'certificates'), false);
+  const uploads = editor.calls.filter((call) => call.kind === 'upload');
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].bucket, 'worker-private');
+  assert.match(uploads[0].path, /^worker\/profile-photo-.*\.jpg$/);
+});
+
+test('restaurant editor keeps WhatsApp and worker save failures remain explicit', async () => {
+  const restaurant = await mountProfileEditor({ role: 'restaurant' });
+  assert.match(restaurant.render(), /WhatsApp/);
+  assert.equal(restaurant.files().length, 2);
+  const worker = await mountProfileEditor({ saveError: { message: 'Save failed' } });
+  assert.match(await worker.save(), /Save failed/);
+  assert.doesNotMatch(worker.render(), /Perfil salvo com sucesso/);
+});
+
 test('profile progress is presentational, deterministic and counts only nonblank fields', () => {
   assert.equal(getProfileProgress('worker', '', {}).percentage, 0);
   assert.equal(getProfileProgress('worker', 'Name', { city: 'City', phone: ' ' }).percentage, 33);
   const worker = getProfileProgress('worker', 'Name', {
-    city: 'City', phone: '123', cpf: '123', resume_pdf_path: 'resume', profile_photo_path: 'photo',
+    city: 'City', phone: '123', cpf: '123', rg: '456', profile_photo_path: 'photo',
   });
   assert.equal(worker.percentage, 100);
   assert.equal(worker.items.length, 6);
