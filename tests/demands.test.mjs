@@ -21,11 +21,25 @@ const ui = load('../app/components/ui/index.tsx', { '@/lib/ui/input-masks': load
 const job = (id, extra = {}) => ({
   id, demand_id: 'demand', title: 'Festival Gastronômico', description: 'Reforço de operação',
   job_date: '2026-11-12', start_time: '10:00:00', end_time: '23:00:00',
-  status: 'open', value: 180, location_name: 'Centro de Eventos', work_address: 'Rua A', work_city: 'São Paulo', ...extra,
+  status: 'open', value: 180, location_name: 'Centro de Eventos', work_address: 'Rua A', work_city: 'São Paulo',
+  location_status: 'ready', work_latitude: -23.55, work_longitude: -46.63, ...extra,
 });
 const before = new Date('2026-11-01T10:00:00-03:00');
 const build = (jobs, applications = [], reserves = [], now = before) => domain.buildDemands(jobs, applications, reserves, now);
 const application = (job_id, worker_id, status = 'pending') => ({ job_id, worker_id, status });
+
+test('invalid operational coordinates block recruitment and hiring without hiding historical applications', () => {
+  for (const changes of [
+    { work_latitude: null }, { work_longitude: null }, { work_latitude: NaN },
+    { work_longitude: Infinity }, { work_latitude: 91 }, { location_status: 'pending_coordinates' },
+  ]) {
+    const invalid = job('a', changes);
+    const [demand] = build([invalid], [application('a', 'worker')]);
+    assert.equal(domain.canRecruitJob(invalid, before), false);
+    assert.equal(domain.canHireDemand(demand, before), false);
+    assert.equal(demand.applications.length, 1);
+  }
+});
 
 test('recruitment closes at five hours exactly, while existing candidates remain hireable until start', () => {
   const regular = job('a', { created_at: '2026-11-11T00:00:00-03:00' });

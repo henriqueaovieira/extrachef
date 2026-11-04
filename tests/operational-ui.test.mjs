@@ -105,7 +105,7 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
         && Number.isFinite(longitude) && Math.abs(longitude) <= 180,
       resolveWorkLocation: async location => {
         db.geocoded.push(location);
-        if (db.geocodingError) return { ...location, latitude: null, longitude: null };
+        if (db.geocodingError) throw new Error(db.geocodingError);
         return { ...location, latitude: -23.5, longitude: -46.6 };
       },
     },
@@ -511,7 +511,7 @@ test('work-location persistence errors remain visible and never publish without 
   } finally { app.unmount(); }
 });
 
-test('operation is published with its address when geocoding fails', async () => {
+test('operation is not published when geocoding fails and submitted address is preserved', async () => {
   const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
   app.db.geocodingError = 'Endereço não localizado.';
   try {
@@ -534,21 +534,10 @@ test('operation is published with its address when geocoding fails', async () =>
     await app.flush();
     await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
     await app.flush();
-    assert.match(app.html(), /Operação publicada com sucesso/);
+    assert.match(app.html(), /Endereço não localizado/);
+    assert.doesNotMatch(app.html(), /Operação publicada com sucesso/);
     assert.equal(app.db.calls.filter(call => call.name === 'save_geocoded_work_location').length, 0);
-    const saveCall = app.db.calls.find(call => call.name === 'save_work_location');
-    assert.deepEqual(saveCall.args, {
-      p_name: 'Local da Operação',
-      p_address: 'Rua Inexistente',
-      p_number: '120',
-      p_neighborhood: '',
-      p_city: 'São Paulo',
-      p_state: 'SP',
-      p_postal_code: '',
-    });
-    const createCall = app.db.calls.find(call => call.name === 'create_restaurant_demand');
-    assert.equal(createCall.args.p_location_source, 'catalog');
-    assert.equal(createCall.args.p_work_location_id, 'operation-location');
-    assert.equal(createCall.args.p_location_revision, 1);
+    assert.equal(app.db.calls.some(call => call.name === 'save_work_location' || call.name === 'create_restaurant_demand'), false);
+    assert.equal(app.elements().find(node => node.props.id === 'operation-street').props.value, 'Rua Inexistente');
   } finally { app.unmount(); }
 });

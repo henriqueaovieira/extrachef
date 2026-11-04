@@ -9,7 +9,7 @@ import DemandPersonSummary from '@/app/components/demand-person';
 import DemandTalentNetwork from '@/app/components/demand-talent-network';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
-import { buildDemands, canHireDemand, canRecruitDemand, demandDate, demandWindow, loadDemands, readDemandPages, recruitmentWindow, type Demand, type DemandApplication, type DemandReserve } from '@/lib/demands';
+import { buildDemands, canHireDemand, canRecruitDemand, demandDate, demandWindow, hasOperationalLocation, loadDemands, readDemandPages, recruitmentWindow, type Demand, type DemandApplication, type DemandReserve } from '@/lib/demands';
 import { demandMapLinks, eventLabels, loadDemandPeople, shareDemand, signDemandPhotos, uniqueDemandCandidates, type DemandEvent, type DemandPerson } from '@/lib/demand-detail';
 import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
 import { ReputationDetails } from '@/app/components/operational-reputation';
@@ -218,7 +218,8 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
   const interrupted = [...operations].filter((operation) => operation.interruption && !operation.replacement_closed_at
     && !operations.some((current) => current.job_id === operation.job_id && !current.interruption))
     .sort((a, b) => (b.interrupted_at ?? '').localeCompare(a.interrupted_at ?? ''))[0];
-  const reserveActive = Boolean(demand && !demand.archived && !demand.cancelled && demandWindow(demand.job).end > now && interrupted?.replacement_requested_at);
+  const replacementReady = Boolean(demand?.jobs.some(job => job.id === interrupted?.job_id && hasOperationalLocation(job)));
+  const reserveActive = Boolean(replacementReady && demand && !demand.archived && !demand.cancelled && demandWindow(demand.job).end > now && interrupted?.replacement_requested_at);
   const alternatives = [...candidates].filter((candidate) => interrupted?.interrupted_at && candidate.created_at
     && new Date(candidate.created_at) < new Date(interrupted.interrupted_at)
     && !operations.some((operation) => operation.worker_id === candidate.worker_id && operation.job_id === candidate.job_id)).sort((a, b) =>
@@ -240,6 +241,9 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
     if (busy) return;
     setBusy(workerId ?? operation); setActionError(''); setNotice('');
     try {
+      if (operation !== 'close_interrupted' && !replacementReady) {
+        throw new Error('A operação precisa de coordenadas válidas antes de receber substituição.');
+      }
       const { error } = operation === 'invite'
         ? await supabase.rpc('invite_demand_worker', { p_demand_id: demandId, p_worker_id: workerId })
         : await supabase.rpc('manage_restaurant_demand', { p_demand_id: demandId, p_action: operation });
@@ -331,6 +335,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
           <>
             {action === 'edit' && <Toast tone="info">Esta operação já possui candidaturas ou foi iniciada. Não é possível editar os dados combinados com a equipe.</Toast>}
             {demand.archived && <Toast tone="info">Operação arquivada. Você pode restaurá-la pelo menu de ações.</Toast>}
+            {!demand.jobs.every(hasOperationalLocation) && <Toast tone="error">Localização operacional pendente. Novas candidaturas e contratações estão bloqueadas. Solicite a revisão do endereço ao suporte.</Toast>}
             <section aria-labelledby="summary-heading" className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 id="summary-heading" className="text-xs font-semibold uppercase tracking-widest text-gray-500">Informações da Operação</h2>
@@ -428,7 +433,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
               <p className="text-sm text-gray-600">Ocorrência registrada. Decida entre encerrar a operação ou convidar candidatos vinculados antes da ocorrência. O recrutamento permanece encerrado.</p>
               <div className="flex flex-wrap gap-3">
                 <Button disabled={busy !== null} onClick={() => void replacementAction('close_interrupted')} className="px-4">Encerrar operação</Button>
-                {!reserveActive && demandWindow(demand.job).end > now && !demand.archived && <Button variant="primary" disabled={busy !== null} onClick={() => void replacementAction('seek_replacement')} className="px-4">Buscar substituto</Button>}
+                {!reserveActive && replacementReady && demandWindow(demand.job).end > now && !demand.archived && <Button variant="primary" disabled={busy !== null} onClick={() => void replacementAction('seek_replacement')} className="px-4">Buscar substituto</Button>}
               </div>
               {reserveActive && (alternatives.length ? alternatives.map((candidate, index) => <div key={candidate.worker_id} className="space-y-2">
                 {index === 0 && <p className="text-xs font-semibold text-orange-800">Primeira alternativa para analisar · confirme a disponibilidade</p>}

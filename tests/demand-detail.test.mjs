@@ -42,7 +42,7 @@ export function fixture() {
   const jobs = Array.from({ length: 4 }, (_, i) => ({
     id: `job${i}`, demand_id: 'operation', demand_revision: 0, title: 'Festival Gastronômico', description: 'Uniforme preto\nChegar 15 minutos antes',
     job_date: '2099-11-12', start_time: '10:00:00', end_time: '23:00:00', status: i < 2 ? 'filled' : 'open', value: 150,
-    location_name: 'Centro de Eventos', work_address: 'Rua A', work_number: '123', work_city: 'São Paulo', work_state: 'SP', work_latitude: -23.55, work_longitude: -46.63,
+    location_name: 'Centro de Eventos', location_status: 'ready', work_address: 'Rua A', work_number: '123', work_city: 'São Paulo', work_state: 'SP', work_latitude: -23.55, work_longitude: -46.63,
   }));
   const applications = [
     { job_id: 'job0', worker_id: 'h1', status: 'approved' },

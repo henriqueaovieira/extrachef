@@ -142,7 +142,7 @@ export default function RestaurantDashboard() {
         supabase.from('public_user_directory').select('name').eq('id', userId).maybeSingle(),
         supabase
           .from('jobs')
-          .select('id, demand_id, title, job_date, start_time, end_time, status, created_at, demand_archived_at, recruitment_blocked, location_name, work_address, work_number, work_city, work_state, value')
+          .select('id, demand_id, title, job_date, start_time, end_time, status, created_at, demand_archived_at, recruitment_blocked, location_name, location_status, work_latitude, work_longitude, work_address, work_number, work_city, work_state, value')
           .eq('restaurant_id', userId)
           .order('job_date', { ascending: true })
           .order('start_time', { ascending: true })

@@ -30,6 +30,7 @@ interface Job {
   work_state: string | null;
   work_latitude: number | null;
   work_longitude: number | null;
+  location_status?: string;
   location_name: string | null;
   restaurant?: {
     name: string;
@@ -121,7 +122,7 @@ export default function WorkerDashboardPage() {
           supabase.from('applications').select('job_id').eq('worker_id', userId),
           supabase
             .from('jobs')
-            .select('id, title, description, job_date, start_time, end_time, value, status, created_at, demand_archived_at, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
+            .select('id, title, description, job_date, start_time, end_time, value, status, created_at, demand_archived_at, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_status, location_name, restaurant:users!restaurant_id(name)')
             .eq('status', 'open')
             .eq('recruitment_available', true)
             .order('job_date', { ascending: true }),

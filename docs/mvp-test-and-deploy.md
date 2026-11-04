@@ -59,6 +59,49 @@ Para padroes visuais, componentes e checklist mobile/acessibilidade, consulte
 
 ### GPS exclusivo do check-in
 
+Para novas operacoes, o GPS depende de snapshot geocodificado valido.
+Seguir o [rollout Photon/cache/prontidao](./geolocation-monitoring.md) e o
+[plano de recuperacao dos legados](./geolocation-recovery-plan.md).
+Nao aplicar migrations automaticamente nem preencher coordenadas em massa.
+
+Para restaurar GPS **apos a implantacao do recrutamento**, usar somente a nova
+[migration corretiva](../supabase/migrations/20261104190000_restore_operational_checkin_gps.sql),
+nao reaplicar as migrations historicas de GPS: elas selecionam assignment apenas
+por job e nao preservam o historico de substituicoes instalado pelo recrutamento.
+A corretiva preserva `participant_assignment`, locks, autorizacao, notificacoes,
+tokens e checkout do recrutamento; apenas restaura a validacao GPS da emissao.
+Nao altera frontend, recrutamento, substituicao, pagamento nem tabelas/dados.
+
+A aplicacao e **manual e ainda nao foi realizada**. Antes dela, conferir
+`jobs.work_latitude/work_longitude` (`double precision`) e as dependencias do
+preflight. A ausencia de coordenadas no snapshot de uma operacao continua sendo
+erro explicito; nao ha preenchimento ou geocodificacao automatica.
+A assinatura fisica passa a ser apenas a de quatro argumentos, com dois defaults
+nulos: chamadas legadas de dois argumentos continuam resolvendo sem ambiguidade.
+Checkout continua sem exigir GPS; check-in legado sem coordenadas recebe erro
+`22023`, nunca um codigo sem validacao de distancia.
+O `NOTIFY pgrst` transacional solicita recarga do schema cache apos o commit.
+Dependencias inesperadas da assinatura antiga abortam a migration, sem `CASCADE`.
+
+Validacao local, sem conectar ao Supabase:
+
+```sh
+node --test tests/recruitment-sql.test.mjs tests/operational-trust-sql.test.mjs
+```
+
+O runner executa os [testes SQL](../supabase/tests/operational_checkin_gps.sql)
+em PGlite isolado, com fixtures identificadas por configuracoes `test.*` e rollback.
+Nao executar esse arquivo em producao. Sao testados os dois estados de origem
+(assinatura legada ou GPS), preflight, reaplicacao, preservacao de dados e funcoes,
+ACLs, argumentos nomeados, GPS invalido/ausente, snapshots invalidos, 99.999 m,
+100 m e 100.001 m, reutilizacao sem bypass e ciclo completo de substituicao,
+pagamento e checkout por dois argumentos.
+PGlite nao valida o cache HTTP do PostgREST nem concorrencia multi-sessao.
+Apos eventual aplicacao autorizada, conferir a assinatura com `pg_proc` e testar
+manualmente o RPC pelo cliente autenticado, dentro e fora do raio.
+
+A descricao abaixo registra a implantacao historica anterior ao recrutamento:
+
 A migration [20261019030000_checkin_gps.sql](../supabase/migrations/20261019030000_checkin_gps.sql)
 substitui `issue_operational_code(uuid,text)` por
 `issue_operational_code(uuid,text,double precision,double precision)`.

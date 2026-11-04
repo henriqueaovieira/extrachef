@@ -390,8 +390,13 @@ consentimento; Abrir rota usa o endereço ou coordenadas disponíveis.
 
 ### Presença, pagamento e encerramento
 
-- Check-in/checkout não solicitam GPS nem validam raio. Os RPCs antigos de
-  presença por coordenadas deixam de estar disponíveis para usuários autenticados.
+- Novas operações exigem geocodificação confirmada e snapshot com coordenadas.
+  O frontend usa somente `/api/geocode`; Photon, cache persistente e coordenação
+  ficam no servidor. Configuração e implantação manual:
+  [geolocalização operacional](./docs/geolocation-monitoring.md).
+- O profissional solicita GPS pontual ao emitir check-in; o banco exige posição
+  dentro de 100 m das coordenadas operacionais. Checkout não solicita GPS.
+  As RPCs antigas de presença por coordenadas permanecem indisponíveis ao cliente.
 - No dia do trabalho, o profissional gera um código temporário de oito caracteres.
   Apresenta à empresa, que digita e confirma sua chegada. O horário da validação,
   gerado pelo banco, é a evidência de check-in e classifica antecipação, pontualidade

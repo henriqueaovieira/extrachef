@@ -17,6 +17,9 @@ export interface HomeJob {
   created_at?: string;
   demand_archived_at?: string | null;
   recruitment_blocked?: boolean;
+  location_status?: string;
+  work_latitude?: number | null;
+  work_longitude?: number | null;
 }
 
 export function groupHomeJobs(jobs: HomeJob[]) {

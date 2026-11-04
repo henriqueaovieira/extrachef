@@ -51,10 +51,7 @@ export async function resolveWorkLocation(location: WorkLocation): Promise<WorkL
     }
     return { ...location, latitude: Number(body.latitude), longitude: Number(body.longitude) };
   } catch (error) {
-    console.warn('Geocoding unavailable; keeping the provided address without coordinates.', {
-      type: error instanceof Error ? error.name : 'unknown',
-    });
-    return { ...location, latitude: null, longitude: null };
+    throw new Error(error instanceof Error ? error.message : 'Não foi possível localizar o endereço. Tente novamente.');
   }
 }
 

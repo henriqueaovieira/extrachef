@@ -1,5 +1,9 @@
 # Locais operacionais: implantação e validação
 
+> Contrato atual: [geolocalização operacional com Photon](./geolocation-monitoring.md).
+> Novas publicações exigem coordenadas; cache e adapter ficam no servidor.
+> O restante deste documento registra a proposta histórica suspensa, não o rollout atual.
+
 > PROPOSTA SUSPENSA. Este documento descreve a implementação anterior, não
 > aprovada para aplicação. O SQL foi preservado em `supabase/proposals/`, fora
 > das migrations executáveis. Para a fase atual independente, siga
@@ -47,7 +51,7 @@ GPS do navegador pode ser impreciso ou falsificado; uma cerca geográfica não
 certifica presença física. As observações originais de checkins/checkouts são
 preservadas. Não ampliamos o raio automaticamente pela precisão do dispositivo.
 
-## Geocodificação: configuração opcional
+## Geocodificação histórica (substituída)
 
 Configure somente no servidor, usando o serviço próprio/contratado escolhido:
 
@@ -90,12 +94,10 @@ da rota não constitui limitação de consumo.
 Não há mapa, pin arrastável ou integração com fornecedor público implícita.
 Somente as coordenadas são mostradas para conferência.
 
-Sem endpoint, ou quando o serviço falhar, a criação da operação continua com o
-endereço informado e coordenadas pendentes. Não são inventadas coordenadas:
-recursos que dependam de distância, proximidade ou validação geográfica não
-estarão disponíveis para essa operação até que suas coordenadas sejam
-resolvidas. A criação e o salvamento do endereço não dependem da configuração
-do serviço.
+O fallback histórico que publicava sem coordenadas foi removido. No contrato
+atual, falha sem cache válido impede publicar; consulte o documento atual
+vinculado acima. O catálogo interno ainda pode guardar endereços pendentes,
+mas isso não autoriza criar uma operação sem snapshot pronto.
 
 ## Migration e dependências
 

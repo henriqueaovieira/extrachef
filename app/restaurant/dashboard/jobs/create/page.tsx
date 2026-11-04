@@ -82,34 +82,26 @@ export default function CreateJobPage() {
         city,
         state,
       });
-      const hasCoordinates = validCoordinates(location.latitude, location.longitude);
-      const { data: savedLocation, error: locationError } = hasCoordinates
-        ? await supabase.rpc('save_geocoded_work_location', {
-          p_name: location.location_name,
-          p_address: location.address,
-          p_number: location.number,
-          p_city: location.city,
-          p_state: location.state,
-          p_latitude: location.latitude,
-          p_longitude: location.longitude,
-        })
-        : await supabase.rpc('save_work_location', {
-          p_name: location.location_name,
-          p_address: location.address,
-          p_number: location.number,
-          p_neighborhood: location.neighborhood,
-          p_city: location.city,
-          p_state: location.state,
-          p_postal_code: location.postal_code,
-        });
+      if (!validCoordinates(location.latitude, location.longitude)) {
+        throw new Error('Localize o endereço da operação antes de publicar.');
+      }
+      const { data: savedLocation, error: locationError } = await supabase.rpc('save_geocoded_work_location', {
+        p_name: location.location_name,
+        p_address: location.address,
+        p_number: location.number,
+        p_city: location.city,
+        p_state: location.state,
+        p_latitude: location.latitude,
+        p_longitude: location.longitude,
+      });
       if (locationError) throw new Error(locationError.message);
       if (!savedLocation || typeof savedLocation !== 'object'
         || !('id' in savedLocation) || typeof savedLocation.id !== 'string'
         || !('revision' in savedLocation) || typeof savedLocation.revision !== 'number') {
         throw new Error('O serviço não confirmou o local da operação.');
       }
-      if (hasCoordinates && (!('geocoding_status' in savedLocation) || savedLocation.geocoding_status !== 'resolved'
-        || !('latitude' in savedLocation) || !validCoordinates(savedLocation.latitude, savedLocation.longitude))) {
+      if (!('geocoding_status' in savedLocation) || savedLocation.geocoding_status !== 'resolved'
+        || !('latitude' in savedLocation) || !validCoordinates(savedLocation.latitude, savedLocation.longitude)) {
         throw new Error('O serviço não confirmou as coordenadas da operação.');
       }
       const { data: demandId, error } = await supabase.rpc('create_restaurant_demand', {
@@ -247,6 +239,7 @@ export default function CreateJobPage() {
             </div>
           </fieldset>
 
+          <p className="text-xs text-gray-500">Dados de localização © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="underline">colaboradores do OpenStreetMap</a>.</p>
           <div>
             <label htmlFor="operation-details" className="mb-1 block text-sm font-medium text-gray-700">Detalhes</label>
             <TextArea id="operation-details"

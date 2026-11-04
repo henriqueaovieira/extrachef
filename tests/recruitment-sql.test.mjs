@@ -7,7 +7,8 @@ const source = name => readFileSync(new URL(`../supabase/migrations/${name}`, im
 const id = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 
 for (const gps of [false,true]) {
-test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'production two-argument'} code issuance`, async t => {
+for (const repairGps of [false,true]) {
+test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'production two-argument'} code issuance${repairGps ? ' + corrective GPS migration' : ''}`, async t => {
   const db = new PGlite();
   t.after(() => db.close());
   const rows = async (sql, args = []) => (await db.query(sql, args)).rows;
@@ -70,7 +71,7 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   await db.exec(source('20261014035000_job_reviews.sql'));
   await db.exec(source('20261017030000_operational_trust.sql'));
   if (gps) await db.exec(source('20261019030000_checkin_gps.sql'));
-  else await db.exec('ALTER TABLE jobs DROP COLUMN work_latitude, DROP COLUMN work_longitude;');
+  else if (!repairGps) await db.exec('ALTER TABLE jobs DROP COLUMN work_latitude, DROP COLUMN work_longitude;');
   const control = source('20261017020000_demand_control_center.sql');
   await db.exec(control.slice(control.indexOf('CREATE FUNCTION public.record_demand_activity()'),
     control.indexOf('INSERT INTO public.demand_events(demand_id,kind,source_key,occurred_at)')));
@@ -109,8 +110,16 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   const messagesBefore = await snapshot('messages');
   const issuanceSignature = gps ? 'uuid,text,double precision,double precision' : 'uuid,text';
   const otherSignature = gps ? 'uuid,text' : 'uuid,text,double precision,double precision';
-  const issueCheckin = key => scalar(gps ? "SELECT issue_operational_code($1,'checkin',0,0)"
+  const issueCheckin = key => scalar(gps || repairGps ? "SELECT issue_operational_code($1,'checkin',0,0)"
     : "SELECT issue_operational_code($1,'checkin')",[key]);
+  const checkGpsSql = async (key,worker) => {
+    await login(0);
+    for (const [setting,value] of Object.entries({
+      'test.checkin_job_id':key, 'test.worker_id':id(worker),
+      'test.restaurant_id':id(1), 'test.outsider_id':id(5),
+    })) await rows('SELECT set_config($1,$2,false)',[setting,value]);
+    await db.exec(readFileSync(new URL('../supabase/tests/operational_checkin_gps.sql',import.meta.url),'utf8'));
+  };
   await db.exec(`ALTER FUNCTION public.issue_operational_code(${issuanceSignature}) RENAME TO saved_code_issuance;`);
   await assert.rejects(db.exec(source('20261104180000_recruitment_availability.sql')),/Recruitment preflight: missing function public.issue_operational_code/);
   await db.exec('ROLLBACK;');
@@ -141,6 +150,31 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
     `issue_operational_code(${issuanceSignature})`]) {
     assert.equal(await scalar("SELECT has_function_privilege('anon',$1,'EXECUTE')",[signature]),false);
     assert.equal(await scalar("SELECT has_function_privilege('authenticated',$1,'EXECUTE')",[signature]),true);
+  }
+  if (repairGps) {
+    const correction = source('20261104190000_restore_operational_checkin_gps.sql');
+    const functions = () => scalar(`SELECT jsonb_agg(jsonb_build_array(p.oid,pg_get_functiondef(p.oid),p.proacl) ORDER BY p.oid)
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND p.prokind='f' AND p.proname<>'issue_operational_code'`);
+    const functionsBefore = await functions();
+    const tables = [...preservedTables,'operational_assignments','operational_codes','demand_invitations','messages'];
+    const dataBefore = new Map();
+    const data = table => scalar(`SELECT COALESCE(jsonb_agg(to_jsonb(row) ORDER BY to_jsonb(row)::text),'[]'::jsonb) FROM ${table} row`);
+    for (const table of tables) dataBefore.set(table,await data(table));
+    await db.exec('ALTER TABLE jobs RENAME COLUMN work_latitude TO unavailable_latitude;');
+    await assert.rejects(db.exec(correction),/Check-in GPS preflight: jobs requires/);
+    await db.exec('ROLLBACK;');
+    await db.exec('ALTER TABLE jobs RENAME COLUMN unavailable_latitude TO work_latitude;');
+    await db.exec('ALTER FUNCTION participant_assignment(uuid) RENAME TO unavailable_assignment;');
+    await assert.rejects(db.exec(correction),/Check-in GPS preflight: missing function/);
+    await db.exec('ROLLBACK;');
+    await db.exec('ALTER FUNCTION unavailable_assignment(uuid) RENAME TO participant_assignment;');
+    await db.exec(correction);
+    await db.exec(correction);
+    assert.deepEqual(await functions(),functionsBefore,'unrelated function definitions and ACLs are unchanged');
+    for (const table of tables) assert.deepEqual(await data(table),dataBefore.get(table),table);
+    assert.notEqual(await scalar("SELECT to_regprocedure('public.issue_operational_code(uuid,text,double precision,double precision)')"),null);
+    assert.equal(await scalar("SELECT to_regprocedure('public.issue_operational_code(uuid,text)')"),null);
   }
   await login(2);
   assert.equal((await rows('SELECT content FROM messages WHERE job_id=$1',[id(700)]))[0].content,'Mensagem histórica');
@@ -293,8 +327,9 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   await login(2);
   const oldMessage = await scalar("INSERT INTO messages(job_id,sender_id,content) VALUES($1,$2,'Conversa anterior') RETURNING id",[replacement,id(2)]);
   await shift(replacement,-1);
+  if (repairGps) await checkGpsSql(replacement,2);
   await login(2);
-  if (gps) {
+  if (gps || repairGps) {
     await assert.rejects(scalar("SELECT issue_operational_code($1,'checkin')",[replacement]),/GPS/);
     await assert.rejects(scalar("SELECT issue_operational_code($1,'checkin',1,1)",[replacement]),/100 metros/);
   }
@@ -331,6 +366,7 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   const inbox = await rows('SELECT * FROM restaurant_operational_message_inbox()');
   assert.equal(inbox.find(item => item.job_id===replacement).latest_message,'Conversa da reserva');
   assert.equal(inbox.find(item => item.job_id===replacement).unread_count,1);
+  if (repairGps) await checkGpsSql(replacement,3);
   await login(3);
   const successorCode = await issueCheckin(replacement);
   await login(1);
@@ -344,6 +380,11 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   await rows("SELECT record_operational_payment($1,'received')",[replacement]);
   await login(1);
   const checkout = await scalar("SELECT issue_operational_code($1,'checkout')",[replacement]);
+  if (repairGps) {
+    const checkoutWithGps = await scalar(`SELECT issue_operational_code(
+      p_job_id=>$1,p_stage=>'checkout',p_latitude=>'NaN'::float8,p_longitude=>'Infinity'::float8)`,[replacement]);
+    assert.deepEqual(checkoutWithGps,checkout,'checkout ignores GPS and reuses the legacy two-argument token');
+  }
   await login(3);
   assert.equal((await scalar("SELECT validate_operational_code($1,'checkout',$2)",[replacement,checkout.code])).phase,'completed');
   await login(0);
@@ -353,5 +394,60 @@ test(`recruitment rules and same-job replacements with ${gps ? 'GPS' : 'producti
   assert.equal((await scalar('SELECT worker_operational_reputation($1)',[id(2)])).abandonments_180d,1);
   await login(3);
   assert.equal((await scalar('SELECT worker_operational_reputation($1)',[id(3)])).completed,1);
+  if (repairGps) {
+    await login(0);
+    const reviewCompleted = async key => {
+      await login(0);
+      await rows(`INSERT INTO reviews(job_id,restaurant_id,worker_id,reviewer_id,reviewed_id,rating,would_work_again)
+        VALUES($1,$2,$3,$2,$3,5,true),($1,$2,$3,$3,$2,5,true)`,[key,id(1),id(3)]);
+    };
+    await reviewCompleted(replacement);
+    await db.exec(`
+      ALTER TABLE jobs ADD COLUMN location_status text NOT NULL DEFAULT 'ready',
+        ADD COLUMN work_number text, ADD COLUMN work_postal_code text, ADD COLUMN work_location_id uuid,
+        ADD COLUMN event_id uuid, ADD COLUMN location_source text DEFAULT 'catalog';
+    `);
+    await db.exec(source('20261015060000_work_locations_catalog.sql'));
+    await db.exec(source('20261104040000_reconcile_geocoded_locations.sql'));
+    await db.exec(source('20261104200000_geocoding_cache.sql'));
+    await db.exec(source('20261104210000_operational_location_readiness.sql'));
+    const secured = await job();
+    await apply(secured,2); await apply(secured,3); await approve(secured,2);
+    await login(2);
+    await rows("SELECT interrupt_operational_assignment($1,'cancelled')",[secured]);
+    await login(1);
+    await rows("SELECT manage_restaurant_demand($1,'seek_replacement')",[secured]);
+    await invite(secured,3); await respond(secured,3,true); await approve(secured,3);
+    await shift(secured,-1);
+    await login(3);
+    await assert.rejects(scalar("SELECT issue_operational_code($1,'checkin',1,1)",[secured]),/100 metros/);
+    const securedCode = await issueCheckin(secured);
+    await login(1);
+    await rows("SELECT validate_operational_code($1,'checkin',$2)",[secured,securedCode.code]);
+    await shift(secured,-9);
+    await login(1); await rows("SELECT record_operational_payment($1,'paid')",[secured]);
+    await login(3); await rows("SELECT record_operational_payment($1,'received')",[secured]);
+    await login(1);
+    const securedCheckout = await scalar("SELECT issue_operational_code($1,'checkout')",[secured]);
+    await login(3);
+    assert.equal((await scalar("SELECT validate_operational_code($1,'checkout',$2)",
+      [secured,securedCheckout.code])).phase,'completed');
+    await reviewCompleted(secured);
+    const invalid = await job();
+    await apply(invalid,2); await apply(invalid,3);
+    // Simulate an existing pre-migration invalid job without changing real data.
+    await login(0);
+    await db.exec('ALTER TABLE jobs DISABLE TRIGGER jobs_guard_operational_location');
+    await rows("UPDATE jobs SET work_latitude=NULL,work_longitude=NULL,location_status='pending_coordinates' WHERE id=$1",[invalid]);
+    await db.exec('ALTER TABLE jobs ENABLE TRIGGER jobs_guard_operational_location');
+    await assert.rejects(approve(invalid,2),/contratação|coordenadas|reserva aceita/);
+    await assert.rejects(invite(invalid,4),/vinculados|coordenadas/);
+    await assert.rejects(apply(invalid,4),/recrutamento|row-level security|coordenadas/);
+    await login(0);
+    await assert.rejects(rows("UPDATE applications SET status='approved' WHERE job_id=$1 AND worker_id=$2",[invalid,id(2)]),
+      /coordenadas válidas/);
+    await rows("UPDATE jobs SET status='cancelled' WHERE id=$1",[invalid]);
+  }
 });
+}
 }

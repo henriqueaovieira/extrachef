@@ -28,8 +28,14 @@ export function recruitmentWindow(job: Pick<DemandJob, 'job_date' | 'start_time'
   return { cutoff: urgent ? start : normalCutoff, urgent, start };
 }
 
-export function canRecruitJob(job: Pick<DemandJob, 'job_date' | 'start_time' | 'end_time' | 'created_at' | 'status' | 'demand_archived_at' | 'recruitment_blocked'>, now = new Date()) {
-  return job.status === 'open' && !job.demand_archived_at && !job.recruitment_blocked && now < recruitmentWindow(job).cutoff;
+export function hasOperationalLocation(job: Pick<DemandJob, 'location_status' | 'work_latitude' | 'work_longitude'>) {
+  return job.location_status === 'ready'
+    && typeof job.work_latitude === 'number' && Number.isFinite(job.work_latitude) && Math.abs(job.work_latitude) <= 90
+    && typeof job.work_longitude === 'number' && Number.isFinite(job.work_longitude) && Math.abs(job.work_longitude) <= 180;
+}
+
+export function canRecruitJob(job: Pick<DemandJob, 'job_date' | 'start_time' | 'end_time' | 'created_at' | 'status' | 'demand_archived_at' | 'recruitment_blocked' | 'location_status' | 'work_latitude' | 'work_longitude'>, now = new Date()) {
+  return hasOperationalLocation(job) && job.status === 'open' && !job.demand_archived_at && !job.recruitment_blocked && now < recruitmentWindow(job).cutoff;
 }
 
 export function canRecruitDemand(demand: Demand, now = new Date()) {
@@ -38,7 +44,7 @@ export function canRecruitDemand(demand: Demand, now = new Date()) {
 
 export function canHireDemand(demand: Demand, now = new Date()) {
   return demand.active && !demand.archived && !demand.running
-    && demand.jobs.some(job => job.status === 'open' && !job.recruitment_blocked && now < demandWindow(job).start);
+    && demand.jobs.some(job => hasOperationalLocation(job) && job.status === 'open' && !job.recruitment_blocked && now < demandWindow(job).start);
 }
 export interface DemandReserve { demand_id: string; worker_id: string }
 export interface Demand {
@@ -165,7 +171,7 @@ export async function loadDemands(client: SupabaseClient, demandId?: string) {
   if (auth.error || !auth.data.user) throw new Error('Entre na conta da empresa para continuar.');
   const userId = auth.data.user.id;
   const jobs = await readDemandPages<DemandJob>((offset) => {
-    let query = client.from('jobs').select('id, demand_id, demand_revision, demand_archived_at, created_at, recruitment_blocked, title, description, value, job_date, start_time, end_time, status, location_name, work_address, work_number, work_neighborhood, work_city, work_state, work_postal_code, work_latitude, work_longitude')
+    let query = client.from('jobs').select('id, demand_id, demand_revision, demand_archived_at, created_at, recruitment_blocked, title, description, value, job_date, start_time, end_time, status, location_name, location_status, work_address, work_number, work_neighborhood, work_city, work_state, work_postal_code, work_latitude, work_longitude')
       .eq('restaurant_id', userId).order('id');
     if (demandId) query = query.eq('demand_id', demandId);
     return query.range(offset, offset + 499);

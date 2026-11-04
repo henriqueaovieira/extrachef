@@ -100,7 +100,7 @@ test('event inheritance creates an editable snapshot, including legacy events', 
   }), geo.emptyWorkLocation);
 });
 
-test('save geocodes automatically, reuses coordinates and falls back to the address on geocoding failures', async (t) => {
+test('save geocodes automatically, reuses coordinates and rejects geocoding failures', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, '/api/geocode');
     assert.equal(JSON.parse(options.body).city, 'Piracicaba');
@@ -113,26 +113,31 @@ test('save geocodes automatically, reuses coordinates and falls back to the addr
   fetch.mock.mockImplementation(async () => Response.json({
     error: 'Geocodificação não configurada. Solicite a configuração do serviço ao administrador.',
   }, { status: 503 }));
-  const unresolved = await geo.resolveWorkLocation(address());
-  assert.equal(unresolved.address, 'Rua das Flores');
-  assert.equal(unresolved.latitude, null);
-  assert.equal(unresolved.longitude, null);
+  await assert.rejects(geo.resolveWorkLocation(address()), /não configurada/);
   fetch.mock.mockImplementation(async () => Response.json({ latitude: 100, longitude: -47 }));
-  assert.equal((await geo.resolveWorkLocation(address())).latitude, null);
+  await assert.rejects(geo.resolveWorkLocation(address()), /coordenadas válidas/);
   fetch.mock.mockImplementation(async () => { throw new Error('Sem conexão'); });
-  assert.equal((await geo.resolveWorkLocation(address())).address, 'Rua das Flores');
+  await assert.rejects(geo.resolveWorkLocation(address()), /Sem conexão/);
 });
 
-function route({ user = { id: 'restaurant' }, authError = null, role = 'restaurant', roleError = null } = {}) {
+const { GeocodingError } = load('../lib/geocoding/types.ts');
+function route({ user = { id: 'restaurant' }, authError = null, role = 'restaurant', roleError = null, active = true, activeError = null,
+  geocode = async () => ({ latitude: -22, longitude: -47 }) } = {}) {
   return load('../app/api/geocode/route.ts', {
     'next/server': { NextResponse: { json: Response.json } },
     '@/lib/work-location': geo,
+    '@/lib/geocoding/types': { GeocodingError },
+    '@/lib/geocoding': { createGeocodingService: () => ({ geocode }) },
     '@/lib/supabase/request': {
       createRequestClient: () => ({
         supabase: {
           auth: { getUser: async () => ({ data: { user }, error: authError }) },
+          rpc: async name => {
+            assert.equal(name, 'account_is_active');
+            return { data: active, error: activeError };
+          },
           from: () => ({
-            select() { return this; }, eq() { return this; },
+            select(columns) { assert.equal(columns, 'role'); return this; }, eq() { return this; },
             single: async () => ({ data: { role }, error: roleError }),
           }),
         },
@@ -144,43 +149,21 @@ function route({ user = { id: 'restaurant' }, authError = null, role = 'restaura
 const request = (body = address()) => new Request('http://localhost/api/geocode', {
   method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' },
 });
-function configure(t, endpoint) {
-  const oldEndpoint = process.env.GEOCODING_ENDPOINT;
-  const oldKey = process.env.GEOCODING_API_KEY;
-  if (endpoint === undefined) delete process.env.GEOCODING_ENDPOINT;
-  else process.env.GEOCODING_ENDPOINT = endpoint;
-  process.env.GEOCODING_API_KEY = 'test-key';
-  t.after(() => {
-    if (oldEndpoint === undefined) delete process.env.GEOCODING_ENDPOINT;
-    else process.env.GEOCODING_ENDPOINT = oldEndpoint;
-    if (oldKey === undefined) delete process.env.GEOCODING_API_KEY;
-    else process.env.GEOCODING_API_KEY = oldKey;
-  });
-}
-
-test('geocoder authenticates the restaurant and rejects invalid address/configuration', async (t) => {
-  configure(t);
+test('geocoder authenticates the restaurant and rejects invalid addresses', async () => {
   assert.equal((await route({ user: null })(request())).status, 401);
   assert.equal((await route({ role: 'worker' })(request())).status, 403);
+  assert.equal((await route({ active: false })(request())).status, 403);
+  assert.equal((await route({ activeError: new Error('unavailable') })(request())).status, 503);
   assert.equal((await route({ roleError: new Error('db') })(request())).status, 503);
   assert.equal((await route()(request({ ...address(), city: '' }))).status, 400);
-  assert.equal((await route()(request())).status, 503);
-  process.env.GEOCODING_ENDPOINT = 'http://provider.invalid';
-  assert.equal((await route()(request())).status, 503);
 });
 
-test('geocoder uses server-only endpoint/key and validates provider response', async (t) => {
-  configure(t, 'https://provider.invalid/geocode');
-  const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
-    assert.equal(url.toString(), 'https://provider.invalid/geocode');
-    assert.equal(options.headers.Authorization, 'Bearer test-key');
-    assert.equal(options.redirect, 'error');
-    const body = JSON.parse(options.body);
-    assert.equal(body.country, 'BR');
-    assert.equal(body.number, '120');
-    return Response.json({ latitude: -22, longitude: -47 });
-  });
-  const response = await route()(request({ ...address(), endpoint: 'https://attacker.invalid' }));
+test('geocoder delegates only validated input and returns explicit adapter failures', async () => {
+  const response = await route({ geocode: async location => {
+    assert.equal(location.city, 'Piracicaba');
+    assert.equal('endpoint' in location, false);
+    return { latitude: -22, longitude: -47 };
+  } })(request({ ...address(), endpoint: 'https://attacker.invalid' }));
   assert.equal(response.status, 200);
   assert.match(response.headers.get('Cache-Control'), /no-store/);
   assert.deepEqual(await response.json(), { latitude: -22, longitude: -47 });
@@ -188,13 +171,12 @@ test('geocoder uses server-only endpoint/key and validates provider response', a
     address: 'Rua das Flores', number: '120', city: 'Piracicaba', state: 'SP',
     location_name: 'Operação', neighborhood: '',
   }))).status, 200);
-  fetch.mock.mockImplementation(async () => Response.json({ latitude: '0', longitude: '0' }));
-  assert.equal((await route()(request())).status, 502);
-  fetch.mock.mockImplementation(async () => new Response('', { status: 429 }));
-  assert.equal((await route()(request())).status, 502);
-  fetch.mock.mockImplementation(async () => { throw new Error('timeout'); });
-  t.mock.method(console, 'error', () => {});
-  assert.equal((await route()(request())).status, 502);
+  const failed = await route({ geocode: async () => {
+    throw new GeocodingError('rate_limited', 'Aguarde.', 429, 60);
+  } })(request());
+  assert.equal(failed.status, 429);
+  assert.equal(failed.headers.get('Retry-After'), '60');
+  assert.equal((await route({ geocode: async () => { throw new Error('internal'); } })(request())).status, 503);
 });
 
 test('job creation no longer captures publisher GPS and worker applications have no GPS gate', () => {

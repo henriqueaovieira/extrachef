@@ -27,7 +27,7 @@ const job = (id, extra = {}) => ({
   id, title: `Demanda ${id}`, job_date: '2099-10-17', start_time: '18:00:00',
   end_time: '23:00:00', status: 'open', restaurant_id: 'restaurant', value: 150,
   location_name: 'Bella Napoli', work_address: 'Rua Central', work_number: '123',
-  work_city: 'São Paulo', work_state: 'SP', ...extra,
+  work_city: 'São Paulo', work_state: 'SP', location_status: 'ready', work_latitude: -23.55, work_longitude: -46.63, ...extra,
 });
 const message = (id, jobId, extra = {}) => ({
   id, job_id: jobId, sender_id: 'worker-a', content: `Mensagem ${id}`,
