@@ -9,6 +9,12 @@ export function geocodingConfiguration() {
   if (process.env.GEOCODING_PROVIDER !== 'photon' || !endpoint
     || !Number.isInteger(timeout) || timeout < 1000 || timeout > 30000
     || !Number.isInteger(ttl) || ttl < 60 || ttl > 7776000) {
+    console.error('GEOCODING CONFIG DEBUG', {
+      provider: process.env.GEOCODING_PROVIDER,
+      endpoint: process.env.GEOCODING_ENDPOINT,
+      timeout: process.env.GEOCODING_TIMEOUT,
+      ttl: process.env.GEOCODING_CACHE_TTL,
+    });
     throw new GeocodingError('configuration', 'Configuração do serviço de geocodificação ausente ou inválida.');
   }
   let url: URL;
