@@ -36,7 +36,153 @@ cada caso: `confirmation_expired`/`confirmation_invalid` no cadastro e
 `recovery_expired`/`recovery_invalid` na recuperação. Nos casos de recuperação,
 o login já abre em **Recuperar senha** para pedir um novo link.
 
-## Perfil profissional
+## Fluxo operacional
+
+### Disponibilidade para recrutamento
+
+A elegibilidade fica centralizada em `lib/demands.ts` e nas funcoes SQL da
+migration `20261104180000_recruitment_availability.sql`. O corte normal e cinco
+horas antes do inicio, inclusive no instante exato do corte. Publicacoes urgentes
+(publicadas no corte ou depois dele, mas antes do inicio) recrutam ate o inicio;
+o formulario avisa sobre a janela reduzida. A data original de publicacao nao
+pode ser alterada para reabrir recrutamento.
+
+Apos o corte, a operacao sai da descoberta publica, da Home/Vagas Abertas do
+profissional e das sugestoes de convite. Candidaturas existentes continuam
+acessiveis, e podem ser aprovadas ate o inicio. Convites comuns enviados antes
+do corte podem ser aceitos ate o inicio. No inicio, novas participacoes e
+contratacoes comuns sao bloqueadas mesmo sem contratado. O restaurante continua
+vendo a operacao e seu historico; contratacoes existentes mantem seu fluxo.
+
+Ausencia, abandono ou cancelamento do contratado nao criam jobs nem reabrem
+recrutamento. No detalhe, o restaurante decide **Encerrar operacao** ou
+**Buscar substituto**. So candidatos vinculados antes da ocorrencia recebem
+convite de substituicao. O aceite informa disponibilidade; o restaurante deve
+confirmar a contratacao antes do termino. A substituicao reutiliza o mesmo job,
+preservando assignments, ocorrencias e confianca operacional anteriores.
+Mensagens sao vinculadas a contratacao, para nao expor conversas anteriores ao
+substituto. Check-in, pagamento, checkout e avaliacoes usam o participante certo.
+
+As telas reavaliam o relogio enquanto abertas, e o banco valida INSERT direto,
+RPCs e reabertura sob locks. Nenhum status funcional novo foi adicionado ao banco.
+Aplicar essa migration exige conferir antes as migrations efetivamente
+instaladas no ambiente: validacao local nao significa deploy remoto concluido.
+
+A revisao de compatibilidade dessa migration preserva a assinatura instalada de
+`issue_operational_code`: dois argumentos sem GPS ou quatro argumentos com GPS.
+GPS nao e requisito para aplicar a regra de recrutamento. As diferencas e os
+cuidados de reaplicacao estao no
+[relatorio de compatibilidade](docs/recruitment-schema-compatibility.md).
+
+Em Talentos, a operacao selecionada tem um resumo proprio; as abas usam chips
+com os mesmos contadores e filtros existentes. Talentos recomendados preserva
+a ordenacao anterior. Cards exibem avaliacao, operacoes concluidas, experiencia
+compartilhada e status, sem modificar convites ou relacionamentos.
+
+No detalhe da operacao, o resumo destaca data, horario, diaria, local e candidatos
+ou a contratacao confirmada. A secao de pessoas mostra Candidatos antes da
+contratacao e Profissional da Operacao depois, sem misturar as duas listas.
+Registros historicos com mais de uma contratacao continuam acessiveis.
+O fluxo compartilhado permanece antes dessa secao.
+As acoes operacionais ficam na timeline existente, sem atalhos duplicados na
+equipe ou barra fixa. Estados vazios de participantes e observacoes sao compactos.
+Local, rota e observacoes ficam dentro do resumo principal. O historico tambem
+fica nele quando vazio ou contendo apenas a criacao da demanda; eventos
+adicionais ou um evento operacional isolado mantem um card de historico proprio.
+
+O detalhe da operacao, as candidaturas do profissional, o Chat e o painel de
+Check-in/Pagamento/Checkout reutilizam `OperationFlow`: Operacao, Contratacao,
+Check-in, Pagamento, Checkout e Conclusao. Etapas bloqueadas nao oferecem links
+para executar a acao. Sem contratacao, o Chat tambem permanece bloqueado.
+
+A apresentacao usa os registros operacionais existentes: check-in confirmado,
+horario de encerramento, pagamento informado, recebimento confirmado pelo
+profissional, checkout e ocorrencias. Informar pagamento nao libera checkout:
+e necessaria a confirmacao de recebimento. Contestacoes e interrupcoes
+permanecem visiveis; falhas de consulta nao liberam etapas por suposicao.
+O Chat continua autorizado pelo RPC `get_approved_chat_context`.
+
+As rotas existentes sao preservadas e continuam usando o mesmo painel.
+O banco e os RPCs de escrita nao foram alterados. O detalhe e o Chat atualizam
+o estado operacional periodicamente e ao recuperar o foco.
+
+Testes focados: `node --test tests/operational-ui.test.mjs tests/demand-detail.test.mjs tests/restaurant-message-ui.test.mjs tests/message-navigation.test.mjs`.
+
+## Privacidade e Preferencias
+
+`/settings/privacy` usa a mesma estrutura para Restaurante e Profissional:
+notificacoes, privacidade do perfil, Centro de Talentos, Perfil Verificado e
+conta e seguranca. O botao inferior salva em `notification_preferences` e
+`privacy_preferences`; valores existentes que nao aparecem na interface sao
+preservados. Falhas de carregamento desabilitam o salvamento para evitar
+sobrescrever preferencias com valores padrao.
+
+Somente preferencias com persistencia e comportamento existentes recebem
+switches. Notificacoes continuam agrupadas pelas categorias atuais de Push:
+mensagens, candidaturas, avaliacoes, operacoes (incluindo convites, check-in e
+check-out) e eventos/reservas. Esses controles nao apagam os avisos da plataforma.
+Endereco profissional nao e oferecido como controle, pois a consulta publica
+atual retorna apenas o endereco comercial. Cidade, score e experiencia do
+profissional permanecem em mais opcoes de visibilidade.
+
+Talentos oferece atalhos para funcionalidades existentes, sem criar regras
+para ocultar profissionais ou bloquear Interesse e convites. A verificacao e
+somente status, com atalho para o fluxo de selfie do profissional; nao e
+inventado um fluxo de verificacao do estabelecimento. Sessoes ativas nao
+aparecem porque nao existe gerenciamento implementado. Alteracao de senha,
+documentos legais, exportacao e exclusao de conta sao preservados. O aceite de
+documentos nao e exibido nas preferencias; o aceite do cadastro permanece
+inalterado. Conta e Seguranca apresenta os cards Seus dados (Exportar dados)
+e Zona de Perigo, mantendo senha e confirmacao explicita antes da exclusao.
+Permissoes tecnicas do dispositivo nao aparecem nesta tela.
+
+Testes focados: `node --test tests/settings-preferences.test.mjs tests/push-privacy.test.mjs tests/privacy-sql.test.mjs`.
+
+## Perfil unico do profissional
+
+`/worker/profile` e a entrada principal da aba **Perfil**. Reutiliza
+`ProfileOverview`, `ProfileEditor` e `ProfileVerification`: dados pessoais,
+especialidades, identidade validada e Confianca Operacional permanecem juntos.
+**Editar perfil** abre o formulario existente na mesma rota com `?edit=1`;
+**Cancelar** volta a visualizacao. Salvar permanece no formulario, com a
+confirmacao existente; ao retornar ao perfil os dados sao consultados novamente.
+
+Historico Operacional, notificacoes, privacidade e sair continuam acessiveis
+na pagina, reutilizando os links do antigo Mais. A presenca e apresentada pelo
+contador existente de check-ins; nenhum score ou calculo operacional mudou.
+
+Compatibilidade mantida, sem excluir paginas:
+
+- `/worker/profile/details` redireciona para `/worker/profile`.
+- `/worker/profile/edit` redireciona para `/worker/profile?edit=1`, preservando
+  a intencao de editar.
+- `/profile` redireciona somente profissionais; restaurantes mantem a tela
+  generica atual.
+- Os redirecionamentos acontecem no cliente apos a protecao de acesso
+  existente, usam substituicao do historico e preservam query/hash, inclusive
+  `#verification` e `#confidence`. As secoes aguardam o carregamento dos dados
+  para posicionar o atalho. Nao sao novas regras de autenticacao.
+
+Nenhum link interno profissional produz mais os caminhos `details` ou `edit`.
+Nao remover as rotas legadas nesta sprint. Uma eventual remocao exige medir
+uso externo/URLs de retorno, validar notificacoes e favoritos antigos e manter
+uma camada de compatibilidade antes de eliminar as paginas. Nao ha remocao
+agendada nem mudanca de notificacoes, banco, RPCs ou Storage nesta entrega.
+
+Testes focados: `node --test tests/worker-profile.test.mjs tests/ui.test.mjs tests/profile-verification.test.mjs tests/restaurant-history.test.mjs tests/communication.test.mjs`.
+
+## Perfil Verificado
+
+Aplicar a migration [20261103000000_verified_profile.sql](supabase/migrations/20261103000000_verified_profile.sql)
+antes de publicar esta interface. Ela reutiliza `worker_profiles.verification_status`,
+`selfie_verification_path` e o bucket privado `worker-private`, sem novas tabelas,
+campos de identidade ou armazenamento paralelo.
+
+Em **Perfil > Perfil Verificado**, o profissional com CPF, RG e telefone salvos
+abre a câmera existente, captura, confere a prévia e confirma o envio.
+Sem selfie aparece **Perfil não verificado**; com selfie `pending`,
+**Verificação em análise**; `rejected` mostra **Revisão necessária** e permite
+nova captura, que retorna a `pending`.
 
 WhatsApp, currículo e certificados não fazem parte da experiência do
 profissional: não aparecem na visualização, edição, uploads, completude ou
@@ -48,6 +194,46 @@ O editor não lê nem grava os campos dos arquivos antigos. O WhatsApp históric
 perfis salvam uma string vazia, sem input ou validação desse campo.
 O WhatsApp do restaurante permanece inalterado.
 
+Se a view `public_user_directory` ainda não expuser `profile_verified`, o provider
+oculta temporariamente os selos e registra o erro de coluna ausente (`42703`)
+somente no console, sem banner. As consultas periódicas continuam e os selos
+voltam a funcionar quando a coluna estiver disponível. Outros erros continuam
+visíveis; o fluxo de selfie e revisão permanece inalterado.
+
+A aprovação/rejeição é manual. Um administrador autorizado deve conferir CPF,
+RG, telefone e a selfie privada no Supabase e executar, somente em ambiente
+administrativo, `review_profile_verification(p_user_id, p_selfie_path, p_status, p_expected_updated_at)`,
+com `p_status` igual a `verified` ou `rejected`. A função só é executável por
+`service_role` (ou pelo administrador do banco); o caminho e o `updated_at`
+conferidos evitam aprovar uma selfie substituída ou dados alterados durante a
+revisão. O banco gera o `updated_at`, sem aceitar a data enviada pelo cliente.
+Não há painel administrativo ou aprovação
+automática no frontend, nem biometria, reconhecimento facial ou prova de vida.
+Uma selfie isolada não comprova identidade: o responsável deve definir os
+critérios e procedimentos de revisão antes de aprovar.
+
+O navegador não pode escrever o status nem trocar diretamente a referência da
+selfie; a RPC de submissão valida propriedade, pré-requisitos e arquivo enviado.
+Arquivos de selfies referenciadas não podem ser sobrescritos ou excluídos pelo
+profissional; o reenvio usa outro objeto no mesmo bucket e remove o anterior
+após registrar a substituição. Falhas de limpeza são notificadas para suporte.
+A exclusão de conta já remove todos os arquivos desse bucket.
+Alterar CPF, RG ou telefone retorna o status a `pending`, exigindo nova revisão
+da identidade com a selfie existente; não altera a Confiança Operacional.
+
+O escudo com check aparece junto aos nomes de profissionais nos perfis,
+talentos/candidatos/convidados, conversas, mensagens e telas da operação.
+O tooltip funciona por hover, foco, clique e toque. Só o indicador
+`public_user_directory.profile_verified` é compartilhado; selfies e documentos
+não integram o diretório. As leituras dos selos são agrupadas e atualizadas ao
+retornar ao app e a cada minuto. A Confiança Operacional, avaliações, mensagens,
+demandas e contratação mantêm suas regras.
+
+**Antes do uso externo:** revisar aprovações históricas (o cliente já teve
+permissão de escrever status em versões anteriores), confirmar as policies
+implantadas e definir responsável, base legal, critérios de revisão e prazo de
+retenção. Esta implementação não certifica conformidade LGPD. Testes focados:
+`node --test tests/profile-verification.test.mjs tests/profile-verification-sql.test.mjs tests/ui.test.mjs tests/privacy-sql.test.mjs`.
 
 ## Home do contratante
 
@@ -89,7 +275,14 @@ vagas preenchidas, convidar e aprovar ficam desabilitados.
 `/restaurant/messages` é a central de comunicação operacional: cada conversa
 corresponde a um profissional contratado e a uma operação, com status e mensagens
 não lidas. O chat só fica disponível após a aprovação da contratação; não é possível
-iniciar uma conversa livremente. Mais reúne perfil, agenda, locais e preferências.
+iniciar uma conversa livremente. O atalho Mensagens em Notificações aponta
+diretamente para `/restaurant/messages`. URLs antigas
+`/restaurant/candidates#chats` e `/restaurant/candidates?view=messages` são
+encaminhadas no cliente para a caixa oficial com substituição do histórico;
+outros parâmetros são preservados e o seletor/hash legado é consumido.
+Candidatos normais e `?demand=` continuam em Talentos, sem montar outra caixa.
+Nenhum aviso persistido, Push ou migration foi alterado para essa compatibilidade.
+Mais reúne perfil, histórico, notificações e preferências.
 Avaliações pendentes substituem a ação principal de criar demanda por um acesso
 direto à avaliação.
 
@@ -102,6 +295,10 @@ profissional tem role `worker`, diferente do próprio restaurante, e cuja empres
 tem role `restaurant`. Registros inconsistentes são ignorados com um aviso no
 console, sem bloquear as demais conversas. A seção “Conversas recentes” da Home
 usa a mesma fonte, então só mostra conversas que também aparecem em Mensagens.
+
+Governança técnica: [rotas oficiais e legadas](docs/routes.md),
+[arquitetura](docs/architecture.md) e
+[relatórios de estabilidade, performance e prioridades](docs/stability-report.md).
 
 ## Demandas 2.0
 
@@ -166,8 +363,8 @@ presença e conversa continuam nas posições individuais.
 O detalhe reúne informações, três candidatos mais recentes, equipe, chat,
 check-in, pagamento, checkout, observações, endereço e linha do tempo. A lista
 completa de candidatos, o perfil e a Rede de Talentos abrem páginas completas,
-com um diálogo de confirmação antes da contratação. A reserva só aparece
-quando existe posição reaberta por cancelamento, ausência ou abandono.
+com um diálogo de confirmação antes da contratação. A substituicao so aparece
+quando existe ocorrencia de cancelamento, ausencia ou abandono, sem reabertura.
 
 A Rede de Talentos permite classificar contatos, conhecidos, favoritos e
 parceiros; recorrentes são profissionais com pelo menos duas demandas concluídas
@@ -219,10 +416,9 @@ consentimento; Abrir rota usa o endereço ou coordenadas disponíveis.
   é afirmada automaticamente. A empresa confirma ausência ou valida o check-in
   tardio. Um check-in tardio elimina o estado pendente sem apagar o histórico.
 - Cancelamento antes da chegada, ausência confirmada ou abandono durante o trabalho
-  preservam a posição original, registram a ocorrência e abrem uma posição de
-  substituição na mesma demanda. Candidaturas pendentes são transferidas, não
-  apagadas. Alternativas usam apenas confiabilidade compartilhada e histórico
-  registrado; a empresa ainda precisa confirmar disponibilidade e contratação.
+  preservam a operacao e registram a ocorrencia, sem reabertura automatica.
+  A empresa decide encerrar ou convidar substituto entre candidatos anteriores
+  a ocorrencia; o aceite ainda exige confirmacao explicita da contratacao.
 - Dados legados são preservados. Não é inventado recebimento para checkouts
   anteriores: eles continuam concluídos, mas não contam como uma cadeia completa
   de evidências de pagamento no novo Score.

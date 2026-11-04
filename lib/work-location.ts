@@ -34,21 +34,28 @@ export function validateWorkAddress(location: WorkLocation) {
 export async function resolveWorkLocation(location: WorkLocation): Promise<WorkLocation> {
   validateWorkAddress(location);
   if (validCoordinates(location.latitude, location.longitude)) return location;
-  const response = await fetch('/api/geocode', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(location),
-  });
-  const body: unknown = await response.json();
-  if (!response.ok) {
-    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
-      ? body.error : 'Não foi possível localizar o endereço.';
-    throw new Error(message);
+  try {
+    const response = await fetch('/api/geocode', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(location),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok) {
+      const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+        ? body.error : 'Não foi possível localizar o endereço.';
+      throw new Error(message);
+    }
+    if (!body || typeof body !== 'object' || !('latitude' in body) || !('longitude' in body)
+      || !validCoordinates(body.latitude, body.longitude)) {
+      throw new Error('O serviço não retornou coordenadas válidas.');
+    }
+    return { ...location, latitude: Number(body.latitude), longitude: Number(body.longitude) };
+  } catch (error) {
+    console.warn('Geocoding unavailable; keeping the provided address without coordinates.', {
+      type: error instanceof Error ? error.name : 'unknown',
+    });
+    return { ...location, latitude: null, longitude: null };
   }
-  if (!body || typeof body !== 'object' || !('latitude' in body) || !('longitude' in body)
-    || !validCoordinates(body.latitude, body.longitude)) {
-    throw new Error('O serviço não retornou coordenadas válidas.');
-  }
-  return { ...location, latitude: Number(body.latitude), longitude: Number(body.longitude) };
 }
 
 export function jobLocationValues(location: WorkLocation) {

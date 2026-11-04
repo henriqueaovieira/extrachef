@@ -7,10 +7,12 @@ import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { DashboardAvatar, DashboardLogo } from '@/app/components/dashboard-identity';
 import { demandWindow } from '@/lib/demands';
-import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
+import { loadOperationalAssignments, loadPendingReviews, type OperationalAssignment, type PendingReview } from '@/lib/operations';
+import OperationFlow from '@/app/components/operation-flow';
 
 interface Application {
   id: string;
+  worker_id: string;
   job_id: string;
   status: string;
   job: {
@@ -81,6 +83,7 @@ export default function WorkerApplicationsPage() {
       const { data, error } = await supabase.from('applications')
         .select(`
           id,
+          worker_id,
           job_id,
           status,
           job:jobs (
@@ -172,9 +175,8 @@ export default function WorkerApplicationsPage() {
         ) : (
           <div className="grid gap-4">
             {visibleApplications.map((application) => {
-              const operation = operations.find((item) => item.job_id === application.job_id);
-              const window = application.job ? demandWindow(application.job) : null;
-              const next = operation && window ? operationNextAction(operation, window.start, window.end, 'worker', clock) : null;
+              const operation = operations.find((item) => item.job_id === application.job_id && item.worker_id === application.worker_id);
+              const window = demandWindow(application.job);
               const label = operation?.interruption ? operation.interruption === 'absent' ? 'Ausência confirmada' : operation.interruption === 'abandoned' ? 'Abandono registrado' : 'Cancelada'
                 : application.status === 'in_progress' && window && clock >= window.end ? 'Trabalho encerrado'
                 : application.status === 'approved' && window && clock < window.start ? 'Você está confirmado para esta operação.'
@@ -197,11 +199,11 @@ export default function WorkerApplicationsPage() {
                     R$ {Number(application.job.value).toFixed(2)}
                   </span>
                 </div>
-                {next && <Link href={next.href} className="ec-button ec-button--primary px-4">{next.label}</Link>}
+                <OperationFlow jobId={application.job_id} role="worker" hired={Boolean(operation) || ['approved', 'in_progress', 'completed'].includes(application.status)}
+                  assignment={operationsError ? null : operation ?? null} startsAt={window.start} endsAt={window.end} now={clock} />
                 <details className="border-t border-gray-100 pt-2">
                   <summary className="cursor-pointer py-2 text-sm text-gray-600">Orientações</summary>
                   <p className="py-3 text-sm text-gray-600">{application.job.description}</p>
-                  {['approved', 'in_progress', 'completed'].includes(application.status) && <Link href={`/chat/${application.job_id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Conversar</Link>}
                 </details>
               </Card>
             ); })}

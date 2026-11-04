@@ -44,12 +44,14 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
     '20261015070000_event_location_snapshots.sql', '20261015080000_job_location_snapshots.sql',
     '20261017010000_operational_demands.sql',
   ]) await db.exec(source(name));
+  await db.exec(source('20261019000000_demand_restaurant_location.sql'));
+  await db.exec(source('20261104080000_single_vacancy_operations.sql'));
   const query = async (sql, args = []) => (await db.query(sql, args)).rows;
   const login = (n) => db.exec(`RESET ROLE; SET request.jwt.claim.sub='${n ? id(n) : ''}'; SET ROLE authenticated;`);
-  const create = async (quantity = 1, location = 'restaurant', locationId = null, revision = null, eventId = null, eventRevision = null) =>
+  const create = async (location = 'restaurant', locationId = null, revision = null, eventId = null, eventRevision = null) =>
     (await query(`SELECT public.create_restaurant_demand('Garcom','Informacoes da operacao','2099-01-01',
-      '22:00','03:00',150,$1,$2,$3,$4,$5,$6) AS id`,
-    [quantity, location, locationId, revision, eventId, eventRevision]))[0].id;
+      '22:00','03:00',150,$1,$2,$3,$4,$5) AS id`,
+    [location, locationId, revision, eventId, eventRevision]))[0].id;
   const jobs = (demand) => query('SELECT * FROM public.jobs WHERE demand_id=$1 ORDER BY id', [demand]);
   const locations = () => query('SELECT * FROM public.work_locations ORDER BY created_at,id');
 
@@ -57,7 +59,7 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
   const legacyLocation = (await query(`SELECT * FROM public.save_work_location('Local antigo','Rua Antiga','','','Sao Paulo','SP','01310100')`))[0];
   const legacyEvent = (await query(`SELECT * FROM public.save_restaurant_event('Evento antigo','Historico','2099-01-01',
     '10:00','18:00',80,'scheduled',NULL,NULL,'set',$1,$2)`, [legacyLocation.id, legacyLocation.revision]))[0];
-  const historicalDemand = await create(1, 'event', null, null, legacyEvent.id, legacyEvent.revision);
+  const historicalDemand = await create('event', null, null, legacyEvent.id, legacyEvent.revision);
   const historicalJobs = await jobs(historicalDemand);
   const historicalEvents = await query('SELECT * FROM public.events');
   await db.exec('RESET ROLE');
@@ -66,7 +68,6 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
   const functions = await query(`SELECT oid::regprocedure::text AS signature, pg_get_functiondef(oid) AS definition
     FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname <> 'create_restaurant_demand' ORDER BY signature`);
   const policies = await query('SELECT * FROM pg_policies WHERE schemaname=$1 ORDER BY tablename,policyname', ['public']);
-  await db.exec(source('20261019000000_demand_restaurant_location.sql'));
   assert.deepEqual(await query(`SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint
     WHERE connamespace='public'::regnamespace ORDER BY conname,definition`), constraints);
   assert.deepEqual(await query(`SELECT oid::regprocedure::text AS signature, pg_get_functiondef(oid) AS definition
@@ -74,10 +75,10 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
   assert.deepEqual(await query('SELECT * FROM pg_policies WHERE schemaname=$1 ORDER BY tablename,policyname', ['public']), policies);
   await login(1);
 
-  await t.test('1, 2, 20 and 50 slots share one automatic default location without an event', async () => {
-    for (const count of [1, 2, 20, 50]) {
-      const rows = await jobs(await create(count));
-      assert.equal(rows.length, count);
+  await t.test('each operation creates one vacancy and reuses the automatic default location', async () => {
+    for (let count = 0; count < 4; count += 1) {
+      const rows = await jobs(await create());
+      assert.equal(rows.length, 1);
       for (const job of rows) {
         assert.equal(job.location_source, 'catalog');
         assert.equal(job.event_id, null);
@@ -130,11 +131,11 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
   });
 
   await t.test('legacy none, catalog, event and duplication contracts still work', async () => {
-    assert.equal((await jobs(await create(1, 'none')))[0].location_status, 'not_set');
+    assert.equal((await jobs(await create('none')))[0].location_status, 'not_set');
     const [legacyDefault] = await query(`SELECT public.create_restaurant_demand('Legado','Sem origem','2099-01-01','10:00','18:00',150) AS id`);
     assert.equal((await jobs(legacyDefault.id))[0].location_source, 'none');
-    assert.equal((await jobs(await create(1, 'catalog', legacyLocation.id, legacyLocation.revision)))[0].work_address, legacyLocation.address);
-    assert.equal((await jobs(await create(1, 'event', null, null, legacyEvent.id, legacyEvent.revision)))[0].event_id, legacyEvent.id);
+    assert.equal((await jobs(await create('catalog', legacyLocation.id, legacyLocation.revision)))[0].work_address, legacyLocation.address);
+    assert.equal((await jobs(await create('event', null, null, legacyEvent.id, legacyEvent.revision)))[0].event_id, legacyEvent.id);
     const [{ id: duplicate }] = await query(`SELECT public.manage_restaurant_demand($1,'duplicate',
       'Copia','Historico','2099-02-01','10:00','18:00',150,1) AS id`, [historicalDemand]);
     const [copy] = await jobs(duplicate);
@@ -147,9 +148,8 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
     const current = (await locations()).find(location => location.is_default);
     await query("SELECT public.manage_work_location($1,'archive',$2)", [current.id, current.revision]);
     const before = await locations();
-    for (const count of [0, -1, 51, null]) await assert.rejects(create(count), /1 a 50/);
     await assert.rejects(query(`SELECT public.create_restaurant_demand('Garcom','Operacao','2099-01-01',
-      '10:00','18:00',0,1,'restaurant')`), /maior que zero/);
+      '10:00','18:00',0,'restaurant')`), /maior que zero/);
     assert.deepEqual(await locations(), before);
     const [job] = await jobs(await create());
     assert.notEqual(job.work_location_id, current.id);
@@ -177,28 +177,28 @@ test('restaurant publication uses real catalog/job constraints and preserves leg
     await assert.rejects(create(), /Complete o endereco principal/);
     assert.deepEqual(await locations(), []);
     await login(1);
-    await assert.rejects(create(1, 'restaurant', legacyLocation.id, 1), /automaticamente/);
-    await assert.rejects(create(1, 'restaurant', null, null, legacyEvent.id, 1), /automaticamente/);
+    await assert.rejects(create('restaurant', legacyLocation.id, 1), /automaticamente/);
+    await assert.rejects(create('restaurant', null, null, legacyEvent.id, 1), /automaticamente/);
   });
 
-  await t.test('failed slot creation rolls back the new default and catalog insertion', async () => {
+  await t.test('failed operation creation rolls back the new default and catalog insertion', async () => {
     await db.exec(`RESET ROLE;
       UPDATE public.restaurant_profiles SET address='Rua Falha, 100',city='Sao Paulo',state='SP',postal_code='01310100'
         WHERE user_id='${id(1)}';
       CREATE FUNCTION public.fail_second_slot() RETURNS trigger LANGUAGE plpgsql AS $fn$
       BEGIN
-        IF EXISTS(SELECT 1 FROM public.jobs WHERE work_address='Rua Falha, 100') THEN
-          RAISE EXCEPTION 'Falha na segunda posicao';
+        IF NEW.work_address='Rua Falha, 100' THEN
+          RAISE EXCEPTION 'Falha na operação';
         END IF;
         RETURN NEW;
       END; $fn$;
-      CREATE TRIGGER fail_second_slot BEFORE INSERT ON public.jobs FOR EACH ROW EXECUTE FUNCTION public.fail_second_slot();`);
+      CREATE TRIGGER fail_operation BEFORE INSERT ON public.jobs FOR EACH ROW EXECUTE FUNCTION public.fail_second_slot();`);
     await login(1);
     const before = await locations();
-    await assert.rejects(create(2), /segunda posicao/);
+    await assert.rejects(create(), /Falha na operação/);
     assert.deepEqual(await locations(), before);
     assert.deepEqual(await query("SELECT id FROM public.jobs WHERE work_address='Rua Falha, 100'"), []);
-    await db.exec('RESET ROLE; DROP TRIGGER fail_second_slot ON public.jobs; DROP FUNCTION public.fail_second_slot();');
+    await db.exec('RESET ROLE; DROP TRIGGER fail_operation ON public.jobs; DROP FUNCTION public.fail_second_slot();');
   });
 
   await t.test('ownership, worker, deleted account, anonymous and catalog permissions remain enforced', async () => {

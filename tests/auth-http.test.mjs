@@ -5,9 +5,13 @@ const origin = process.env.EXTRACHEF_TEST_URL;
 
 test('unauthenticated protected pages redirect without cache or loss of deep link', { skip: !origin }, async (t) => {
   for (const path of [
-    '/restaurant/demands', '/worker/dashboard', '/chat/123?from=push',
+    '/restaurant/demands', '/restaurant/messages', '/restaurant/candidates',
+    '/restaurant/candidates?view=messages&from=legacy',
+    '/restaurant/candidates?demand=d1', '/worker/dashboard', '/chat/123?from=push',
     '/checkin/123', '/checkout/123', '/payment/123', '/reviews/123',
-    '/notifications', '/settings/privacy', '/profile',
+    '/notifications', '/settings/privacy', '/profile', '/profile?from=legacy',
+    '/worker/profile', '/worker/profile?edit=1',
+    '/worker/profile/details?from=legacy', '/worker/profile/edit?from=legacy',
   ]) {
     await t.test(path, async () => {
       const response = await fetch(new URL(path, origin), { redirect: 'manual' });

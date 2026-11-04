@@ -12,6 +12,10 @@ import ProfileProgress from '@/app/components/profile-progress';
 import { getProfileProgress } from '@/lib/ui/profile-progress';
 import OperationalReputationView from '@/app/components/operational-reputation';
 import { DashboardLogo } from '@/app/components/dashboard-identity';
+import ProfileVerification from '@/app/components/profile-verification';
+import VerifiedProfileBadge from '@/app/components/verified-profile-badge';
+import { getVerificationState, type VerificationProfile } from '@/lib/profile-verification';
+import { MoreNavigationLinks } from '@/app/components/more-navigation';
 
 type ProfileRole = 'worker' | 'restaurant';
 
@@ -19,11 +23,10 @@ interface ProfileView {
   name: string;
   role: ProfileRole;
   city: string | null;
-  score: number | null;
   details: Array<[string, string]>;
   imageUrl: string | null;
   gallery: string[];
-  verificationStatus: string | null;
+  verification: VerificationProfile | null;
 }
 
 export default function ProfileOverview({ role }: { role: ProfileRole }) {
@@ -48,7 +51,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
 
       const { data: user, error: userError } = await supabase
         .from('public_user_directory')
-        .select('name, role, city, score')
+        .select('name, role, city')
         .eq('id', authData.user.id)
         .single();
 
@@ -82,10 +85,13 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
               name: user.name,
               role,
               city: data.city,
-              score: user.score,
               imageUrl,
               gallery: [],
-              verificationStatus: data.verification_status,
+              verification: {
+                cpf: data.cpf, rg: data.rg, phone: data.phone,
+                selfie_verification_path: data.selfie_verification_path,
+                verification_status: data.verification_status,
+              },
               details: [
                 ['CPF', data.cpf],
                 ['RG', data.rg],
@@ -94,7 +100,6 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
                 ['Endereço', `${data.address}, ${data.city} - ${data.state}, ${data.postal_code}`],
                 ['Experiência', data.experience || 'Não informada'],
                 ['Especialidades', (data.specialties ?? []).join(', ') || 'Não informadas'],
-                ['Selfie', data.selfie_verification_path ? 'Enviada' : 'Não enviada'],
               ],
             });
           }
@@ -123,10 +128,9 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
               name: data.trade_name,
               role,
               city: data.city,
-              score: user.score,
               imageUrl,
               gallery,
-              verificationStatus: null,
+              verification: null,
               details: [
                 ['Razão social', data.legal_name],
                 ['CNPJ', data.cnpj],
@@ -143,13 +147,32 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
       if (isMounted) setLoading(false);
     }
 
-    void loadProfile();
+    let refreshing = false;
+    const refresh = async () => {
+      if (refreshing || !isMounted) return;
+      refreshing = true;
+      try { await loadProfile(); }
+      finally { refreshing = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 60_000);
+    const onFocus = () => void refresh();
+    window.addEventListener('focus', onFocus);
     return () => {
       isMounted = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
     };
   }, [role, supabase]);
 
-  const editHref = role === 'worker' ? '/worker/profile/edit' : '/restaurant/profile/edit';
+  useEffect(() => {
+    if (loading || role !== 'worker') return;
+    const id = window.location.hash.slice(1);
+    if (id !== 'verification' && id !== 'confidence') return;
+    document.getElementById(id)?.scrollIntoView();
+  }, [loading, role]);
+
+  const editHref = role === 'worker' ? '/worker/profile?edit=1' : '/restaurant/profile/edit';
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28 sm:px-6 sm:py-10 md:pb-10">
       <section className="mx-auto max-w-2xl space-y-6">
@@ -161,7 +184,7 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
           {role === 'restaurant' ? (
             <Link href="/restaurant/more" className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">← Mais</Link>
           ) : (
-            <Link href="/worker/profile" className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">← Mais</Link>
+            <Link href="/worker/dashboard" className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">← Início</Link>
           )}
         </header>
 
@@ -187,15 +210,18 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
                 <div className="flex size-16 items-center justify-center rounded-full bg-orange-100 text-xl font-bold text-orange-800">{profile.name.trim().charAt(0).toUpperCase()}</div>
               )}
               <div className="min-w-0 flex-1">
-                <h2 className="break-words text-xl font-bold text-gray-950">{profile.name}</h2>
+                <h2 className="break-words text-xl font-bold text-gray-950">{profile.name}{profile.verification && getVerificationState(profile.verification) === 'verified' && <VerifiedProfileBadge />}</h2>
                 <p className="text-sm text-gray-600">{profile.role === 'worker' ? 'Profissional' : 'Restaurante'} · {profile.city || 'Cidade não informada'}</p>
               </div>
               <Link href={editHref} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">Editar perfil</Link>
+              {role === 'worker' && <Link href="/worker/profile#verification" className="inline-flex min-h-12 items-center text-sm font-semibold text-orange-700">Verificação</Link>}
             </div>
 
-            {profile.verificationStatus && (
-              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Verificação: {profile.verificationStatus === 'pending' ? 'Pendente' : profile.verificationStatus === 'verified' ? 'Verificada' : 'Requer revisão'}</p>
-            )}
+            {profile.verification && <ProfileVerification profile={profile.verification} onSubmitted={(path) => {
+              setProfile((current) => current?.verification ? {
+                ...current, verification: { ...current.verification, selfie_verification_path: path, verification_status: 'pending' },
+              } : current);
+            }} />}
 
             <dl className="grid gap-x-6 gap-y-4 border-t border-gray-100 pt-5 sm:grid-cols-2">
               {profile.details.map(([label, value]) => (
@@ -217,16 +243,20 @@ export default function ProfileOverview({ role }: { role: ProfileRole }) {
           <>
             {role === 'worker' && <div id="confidence"><OperationalReputationView /></div>}
             <PushNotificationControl />
-            <Link href="/settings/privacy" className="flex min-h-12 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">
+            {role === 'restaurant' && <Link href="/settings/privacy" className="flex min-h-12 items-center justify-center rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50">
               Preferências de notificações e privacidade
-            </Link>
+            </Link>}
           </>
         )}
       </section>
+      {role === 'worker' && <section aria-labelledby="profile-navigation-heading" className="mx-auto mt-6 max-w-2xl">
+        <h2 id="profile-navigation-heading" className="text-lg font-semibold">Acessos da conta</h2>
+        <MoreNavigationLinks role="worker" />
+      </section>}
       <section className="mx-auto mt-6 max-w-2xl">
         <LogoutButton />
       </section>
-      {profile && <MobileBottomNav role={profile.role} />}
+      {(profile || role === 'worker') && <MobileBottomNav role={role} showOnDesktop={role === 'worker'} />}
     </main>
   );
 }

@@ -10,9 +10,10 @@ import NotificationBell from '@/app/components/notification-bell';
 import { DashboardAvatar, DashboardLogo } from '@/app/components/dashboard-identity';
 import { useCommunication } from '@/app/components/communication-state';
 import { groupHomeJobs, isUpcomingJob, jobStatusLabels, latestMessagesByJob, type HomeJob as Job } from '@/lib/restaurant-home';
-import { demandWindow } from '@/lib/demands';
+import { canRecruitJob, demandWindow } from '@/lib/demands';
 import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
 import { loadRestaurantMessageInbox, type RestaurantMessageConversation } from '@/lib/restaurant-message-inbox';
+import ProfessionalVerification from '@/app/components/professional-verification';
 
 interface Application {
   job_id: string;
@@ -49,6 +50,7 @@ interface InboxAction {
 
 interface Conversation {
   jobId: string;
+  workerId: string;
   person: string;
   demand: string;
   content: string;
@@ -140,7 +142,7 @@ export default function RestaurantDashboard() {
         supabase.from('public_user_directory').select('name').eq('id', userId).maybeSingle(),
         supabase
           .from('jobs')
-          .select('id, demand_id, title, job_date, start_time, end_time, status, location_name, work_address, work_number, work_city, work_state, value')
+          .select('id, demand_id, title, job_date, start_time, end_time, status, created_at, demand_archived_at, recruitment_blocked, location_name, work_address, work_number, work_city, work_state, value')
           .eq('restaurant_id', userId)
           .order('job_date', { ascending: true })
           .order('start_time', { ascending: true })
@@ -177,7 +179,7 @@ export default function RestaurantDashboard() {
       const ownJobs = (jobsResult.data ?? []) as Job[];
       setJobs(ownJobs);
       const activeJobs = ownJobs.filter((job) => isUpcomingJob(job));
-      const openJobIds = activeJobs.filter((job) => job.status === 'open').map((job) => job.id);
+      const openJobIds = activeJobs.filter((job) => canRecruitJob(job, clock)).map((job) => job.id);
       const activeDemandIds = new Set(activeJobs.map((job) => job.demand_id || job.id));
       const activeJobIds = ownJobs.filter((job) => activeDemandIds.has(job.demand_id || job.id)).map((job) => job.id);
 
@@ -263,7 +265,7 @@ export default function RestaurantDashboard() {
       }
       if (!pendingResult.error) {
         for (const [demandId, group] of groupHomeJobs(activeJobs)) {
-          const job = group.find((item) => item.status === 'open');
+          const job = group.find((item) => canRecruitJob(item, clock));
           if (!job || pendingApplications.some((application) => group.some((item) => item.id === application.job_id))) continue;
           actionItems.push({
             id: `staffing-${job.id}`, kind: 'staffing',
@@ -307,6 +309,7 @@ export default function RestaurantDashboard() {
           .slice(0, 3)
           .map((conversation) => ({
             jobId: conversation.job_id,
+            workerId: conversation.worker_id,
             person: conversation.worker_name,
             demand: conversation.demand_title,
             content: conversation.latest_message ?? '',
@@ -320,7 +323,7 @@ export default function RestaurantDashboard() {
     return () => {
       mounted = false;
     };
-  }, [supabase, reloadKey, counts.messages]);
+  }, [supabase, reloadKey, counts.messages, clock]);
 
   const operationActions = operations.flatMap((operation) => {
     const job = jobs.find((job) => job.id === operation.job_id);
@@ -401,7 +404,7 @@ export default function RestaurantDashboard() {
             <div className="divide-y divide-orange-100 rounded-2xl border border-orange-100 bg-orange-50/40 px-4 sm:px-5">
               {reviews.map((review) => <article key={`review-${review.job_id}`} className="flex flex-wrap items-center justify-between gap-3 py-4">
                 <div><p className="font-semibold">Avaliação pendente · {review.title}</p><p className="mt-1 text-sm text-gray-600">Antes de criar uma nova operação, avalie sua última experiência.</p></div>
-                <Link href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name}</Link>
+                <div className="flex items-center"><Link href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name}</Link><ProfessionalVerification jobId={review.job_id} /></div>
               </article>)}
               {operationActions.map((action) => <article key={`operation-${action.jobId}`} className="flex flex-wrap items-center justify-between gap-3 py-4">
                 <div><h3 className="font-semibold">{action.title}</h3><p className="mt-1 text-sm text-gray-600">{action.label}</p></div>
@@ -418,7 +421,7 @@ export default function RestaurantDashboard() {
                         {action.kind === 'application' ? 'Novo candidato aguardando análise' : action.kind === 'staffing' ? 'Equipe incompleta' : 'Mensagem não lida'}
                       </p>
                       <p className="mt-0.5 truncate text-sm text-gray-600">
-                        {action.person ? `${action.person} · ` : ''}{action.demand}{action.kind !== 'staffing' ? ` · ${formatTime(action.createdAt)}` : ''}
+                        {action.person && <>{action.person}<ProfessionalVerification userId={action.workerId} jobId={action.jobId} />{' · '}</>}{action.demand}{action.kind !== 'staffing' ? ` · ${formatTime(action.createdAt)}` : ''}
                       </p>
                       {action.kind !== 'application' && <p className="mt-1 line-clamp-2 text-sm text-gray-700">{action.detail}</p>}
                     </div>
@@ -476,18 +479,19 @@ export default function RestaurantDashboard() {
           ) : conversationError || pageError ? null : conversations.length ? (
             <div className="divide-y divide-gray-200 rounded-2xl border border-gray-200 bg-white px-4 sm:px-5">
               {conversations.map((conversation) => (
-                <Link key={conversation.jobId} href={`/chat/${conversation.jobId}`} className="flex min-h-[4.75rem] items-center gap-3 py-3 transition hover:bg-gray-50">
-                  <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-gray-100 text-sm font-semibold text-gray-700">
+                <article key={conversation.jobId} className="relative flex min-h-[4.75rem] items-center gap-3 py-3 transition hover:bg-gray-50">
+                  <Link href={`/chat/${conversation.jobId}`} aria-label={`Conversa com ${conversation.person}`} className="absolute inset-0 rounded-xl focus-visible:outline-2 focus-visible:outline-orange-700" />
+                  <span aria-hidden="true" className="pointer-events-none grid size-10 shrink-0 place-items-center rounded-full bg-gray-100 text-sm font-semibold text-gray-700">
                     {conversation.person.trim().charAt(0).toUpperCase()}
                   </span>
-                  <span className="min-w-0 flex-1">
+                  <span className="pointer-events-none min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-semibold text-gray-950">{conversation.person}</span>
+                      <span className="flex items-center text-sm font-semibold text-gray-950"><span className="truncate">{conversation.person}</span><ProfessionalVerification userId={conversation.workerId} /></span>
                       {conversation.createdAt && <span className="shrink-0 text-xs text-gray-500">{formatTime(conversation.createdAt)}</span>}
                     </span>
                     {conversation.content && <span className="mt-0.5 block truncate text-sm text-gray-600">{conversation.content}</span>}
                   </span>
-                </Link>
+                </article>
               ))}
             </div>
           ) : (

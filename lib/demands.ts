@@ -21,6 +21,25 @@ export interface DemandApplication {
   status: string;
   created_at?: string;
 }
+export function recruitmentWindow(job: Pick<DemandJob, 'job_date' | 'start_time' | 'end_time' | 'created_at'>) {
+  const { start } = demandWindow(job);
+  const normalCutoff = new Date(start.getTime() - 5 * 60 * 60 * 1000);
+  const urgent = Boolean(job.created_at && new Date(job.created_at) >= normalCutoff);
+  return { cutoff: urgent ? start : normalCutoff, urgent, start };
+}
+
+export function canRecruitJob(job: Pick<DemandJob, 'job_date' | 'start_time' | 'end_time' | 'created_at' | 'status' | 'demand_archived_at' | 'recruitment_blocked'>, now = new Date()) {
+  return job.status === 'open' && !job.demand_archived_at && !job.recruitment_blocked && now < recruitmentWindow(job).cutoff;
+}
+
+export function canRecruitDemand(demand: Demand, now = new Date()) {
+  return demand.active && !demand.archived && !demand.running && demand.jobs.some(job => canRecruitJob(job, now));
+}
+
+export function canHireDemand(demand: Demand, now = new Date()) {
+  return demand.active && !demand.archived && !demand.running
+    && demand.jobs.some(job => job.status === 'open' && !job.recruitment_blocked && now < demandWindow(job).start);
+}
 export interface DemandReserve { demand_id: string; worker_id: string }
 export interface Demand {
   id: string;
@@ -86,9 +105,10 @@ export function buildDemands(jobs: DemandJob[], applications: DemandApplication[
     const risk = active && ((shortage > 0 && start.getTime() - now.getTime() <= 24 * 60 * 60 * 1000) || checkout);
     const health = !active ? 'neutral' : risk ? 'risk' : shortage > 0 ? 'warning' : 'safe';
     const status = cancelled ? 'Cancelada' : completed ? 'Concluída' : checkout ? 'Checkout Pendente'
-      : active && end <= now ? 'Não preenchida'
+      : active && (end <= now || (start <= now && hired === 0)) ? 'Não preenchida'
       : running ? 'Em Andamento' : hired >= required ? required === 1 ? 'Profissional Contratado' : 'Equipe Completa'
-      : hired > 0 ? 'Equipe em formação' : pending.size ? 'Recebendo Candidaturas' : 'Buscando Profissionais';
+      : hired > 0 ? 'Equipe em formação' : !group.some((item) => canRecruitJob(item, now)) ? 'Recrutamento encerrado'
+        : pending.size ? 'Recebendo Candidaturas' : 'Buscando Profissionais';
     return {
       id, job, jobs: group, required, hired, reserve, candidates: pending.size, applications: assignments,
       status, health, healthLabel: !active ? status : checkout ? 'Confira o encerramento da operação'
@@ -111,7 +131,7 @@ export function filterDemands(demands: Demand[], filter: DemandFilter, now = new
     if (demand.archived) return false;
     switch (filter) {
       case 'today': return !demand.cancelled && (new Date(`${demand.job.job_date}T12:00:00`).toDateString() === now.toDateString() || demand.running);
-      case 'hiring': return demand.active && demand.hired < demand.required && demandWindow(demand.job).end > now;
+      case 'hiring': return canRecruitDemand(demand, now);
       case 'running': return demand.running;
       case 'completed': return demand.completed;
       case 'cancelled': return demand.cancelled;
@@ -145,7 +165,7 @@ export async function loadDemands(client: SupabaseClient, demandId?: string) {
   if (auth.error || !auth.data.user) throw new Error('Entre na conta da empresa para continuar.');
   const userId = auth.data.user.id;
   const jobs = await readDemandPages<DemandJob>((offset) => {
-    let query = client.from('jobs').select('id, demand_id, demand_revision, demand_archived_at, created_at, title, description, value, job_date, start_time, end_time, status, location_name, work_address, work_number, work_neighborhood, work_city, work_state, work_postal_code, work_latitude, work_longitude')
+    let query = client.from('jobs').select('id, demand_id, demand_revision, demand_archived_at, created_at, recruitment_blocked, title, description, value, job_date, start_time, end_time, status, location_name, work_address, work_number, work_neighborhood, work_city, work_state, work_postal_code, work_latitude, work_longitude')
       .eq('restaurant_id', userId).order('id');
     if (demandId) query = query.eq('demand_id', demandId);
     return query.range(offset, offset + 499);

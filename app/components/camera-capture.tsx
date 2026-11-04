@@ -6,12 +6,15 @@ import { useEffect, useRef, useState } from 'react';
 interface CameraCaptureProps {
   label: string;
   facingMode?: 'user' | 'environment';
+  allowFileFallback?: boolean;
   onCapture: (file: File) => void;
 }
 
-export default function CameraCapture({ label, facingMode = 'user', onCapture }: CameraCaptureProps) {
+export default function CameraCapture({ label, facingMode = 'user', allowFileFallback = true, onCapture }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mountedRef = useRef(false);
+  const startingRef = useRef(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -21,32 +24,46 @@ export default function CameraCapture({ label, facingMode = 'user', onCapture }:
     setIsStreaming(false);
   };
 
-  useEffect(() => () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   const startCamera = async () => {
+    if (startingRef.current) return;
     setErrorMessage('');
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setErrorMessage('A câmera não está disponível neste navegador. Use o seletor de arquivo.');
+      setErrorMessage(allowFileFallback
+        ? 'A câmera não está disponível neste navegador. Use o seletor de arquivo.'
+        : 'A câmera não está disponível neste navegador. Abra o ExtraChef em um navegador com acesso à câmera.');
       return;
     }
 
+    startingRef.current = true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: facingMode } },
         audio: false,
       });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      setIsStreaming(true);
+      if (mountedRef.current) setIsStreaming(true);
     } catch {
-      setErrorMessage('Não foi possível abrir a câmera. Confira a permissão do navegador.');
-    }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (mountedRef.current) setErrorMessage('Não foi possível abrir a câmera. Confira a permissão do navegador.');
+    } finally { startingRef.current = false; }
   };
 
   const capturePhoto = () => {
@@ -67,6 +84,7 @@ export default function CameraCapture({ label, facingMode = 'user', onCapture }:
 
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
+      if (!mountedRef.current) return;
       if (!blob) {
         setErrorMessage('Não foi possível salvar a foto.');
         return;

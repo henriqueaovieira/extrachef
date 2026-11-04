@@ -21,24 +21,27 @@ test('Mais lists Histórico Operacional after profile without retired navigation
   assert.ok(history.includes('EmptyState'));
 });
 
-test('worker Mais shares the restaurant navigation structure and keeps profile details on Meu Perfil', () => {
+test('worker profile reuses account navigation and legacy routes only redirect', () => {
   const more = read('../app/components/more-navigation.tsx');
   const workerSection = more.split("worker: [")[1].split('],')[0];
   for (const label of ['Meu Perfil', 'Histórico Operacional', 'Confiança', 'Notificações', 'Privacidade e Preferências']) {
     assert.ok(workerSection.includes(`label: '${label}'`), label);
   }
-  assert.ok(workerSection.includes("href: '/worker/profile/details'"));
+  assert.ok(workerSection.includes("href: '/worker/profile'"));
   assert.ok(workerSection.includes("href: '/worker/dashboard#historico'"));
-  assert.ok(workerSection.includes("href: '/worker/profile/details#confidence'"));
+  assert.ok(workerSection.includes("href: '/worker/profile#confidence'"));
+  assert.ok(workerSection.includes("href: '/worker/profile#verification'"));
   assert.match(more, /className="flex min-h-20 items-center justify-between gap-4 py-4"/);
   assert.match(more, /aria-hidden="true" className="text-gray-400">→/);
-  assert.match(read('../app/worker/profile/page.tsx'), /MoreNavigation role="worker"/);
-  assert.match(read('../app/worker/profile/details/page.tsx'), /ProfileOverview role="worker"/);
+  assert.match(read('../app/worker/profile/page.tsx'), /<WorkerProfileExperience \/>/);
+  assert.match(read('../app/worker/profile/details/page.tsx'), /<WorkerProfileRedirect \/>/);
+  assert.match(read('../app/worker/profile/edit/page.tsx'), /<WorkerProfileRedirect edit \/>/);
+  assert.match(read('../app/components/profile-overview.tsx'), /<MoreNavigationLinks role="worker" \/>/);
   assert.match(read('../app/components/profile-overview.tsx'), /<ProfileProgress progress=\{progress\} \/>/);
   assert.match(read('../app/components/profile-overview.tsx'), /Completar perfil/);
   assert.match(read('../app/components/profile-overview.tsx'), /id="confidence"/);
-  assert.match(read('../app/components/dashboard-identity.tsx'), /role === 'worker' \? '\/worker\/profile\/details'/);
-  assert.match(read('../app/components/profile-editor.tsx'), /role === 'worker' \? '\/worker\/profile\/details'/);
+  assert.match(read('../app/components/dashboard-identity.tsx'), /role === 'worker' \? '\/worker\/profile'/);
+  assert.match(read('../app/components/profile-editor.tsx'), /role === 'worker' \? '\/worker\/profile'/);
 });
 
 test('every page reached from Mais retains a labeled return link to the correct destination', () => {
@@ -46,7 +49,7 @@ test('every page reached from Mais retains a labeled return link to the correct 
     '../app/components/profile-overview.tsx',
     '../app/restaurant/history/page.tsx',
     '../app/components/notification-center.tsx',
-    '../app/components/privacy-settings.tsx',
+    '../app/components/settings-components.tsx',
   ]) {
     const source = read(file);
     const backLink = source.match(/<Link\b[^>]*href="\/restaurant\/more"[^>]*>([\s\S]*?)<\/Link>/);

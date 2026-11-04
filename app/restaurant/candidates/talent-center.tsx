@@ -6,7 +6,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, EmptyState, LoadingSkeleton, Select, TextInput, Toast } from '@/app/components/ui';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
-import { buildDemands, demandWindow, loadDemands, type Demand } from '@/lib/demands';
+import ProfessionalVerification from '@/app/components/professional-verification';
+import { buildDemands, canHireDemand, canRecruitDemand, demandWindow, loadDemands, type Demand } from '@/lib/demands';
 import { signDemandPhotos } from '@/lib/demand-detail';
 import type { OperationalReputation } from '@/lib/operations';
 import { commonSpecialties } from '@/lib/specialties';
@@ -133,6 +134,13 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const refresh = () => setNow(new Date());
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -143,7 +151,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         const now = new Date();
         const demandData = await loadDemands(supabase);
         const loadedDemands = buildDemands(demandData.jobs, demandData.applications, demandData.reserves, now)
-          .filter((demand) => demand.active && !demand.archived && demandWindow(demand.job).end > now)
+          .filter((demand) => canHireDemand(demand, now))
           .sort((a, b) => demandWindow(a.job).start.getTime() - demandWindow(b.job).start.getTime());
         const rows: Talent[] = [];
         for (let offset = 0; ; offset += 100) {
@@ -196,13 +204,15 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [selected, filtersOpen]);
 
-  const current = demands.find((demand) => demand.id === demandId) ?? null;
+  const availableDemands = demands.filter((demand) => canHireDemand(demand, now));
+  const current = availableDemands.find((demand) => demand.id === demandId) ?? null;
+  const recruiting = Boolean(current && canRecruitDemand(current, now));
   const full = Boolean(current && current.hired >= current.required);
   const talentById = useMemo(() => new Map(talents.map((talent) => [talent.id, talent])), [talents]);
-  const board = useMemo(() => classifyDemandTalents(
+  const board = classifyDemandTalents(
     current?.applications ?? [],
     invitations.filter((invitation) => invitation.demand_id === current?.id),
-  ), [current, invitations]);
+  );
 
   const statusOf = (talent: Talent): DemandTalentStatus | null => board.invited.get(talent.id) ?? board.candidates.get(talent.id) ?? null;
 
@@ -225,7 +235,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const visibleCandidates = candidatePeople.filter(matches);
   const visibleInterests = interestPeople.filter(matches);
 
-  const rankedEligible = current && !full && !board.invited.size
+  const rankedEligible = current && recruiting && !full && !board.invited.size
     ? rankSuggestions(talents.filter((talent) => !board.applicationByWorker.has(talent.id)), current.job.title).map((talent) => talent.id)
     : [];
   const previousSuggestions = suggestionMemo[demandId] ?? [];
@@ -384,7 +394,10 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   };
 
   const invite = async (talent: Talent) => {
-    if (!current) return;
+    if (!current || !canRecruitDemand(current, new Date())) {
+      setError('O recrutamento desta operação foi encerrado.');
+      return;
+    }
     setBusy(talent.id);
     setError('');
     setNotice('');
@@ -404,7 +417,11 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   };
 
   const approve = async () => {
-    if (!approveTarget || !current) return;
+    if (!approveTarget) return;
+    if (!current || !canHireDemand(current, new Date())) {
+      setError('O horário de contratação desta operação foi encerrado.');
+      return;
+    }
     setBusy(approveTarget.id);
     setError('');
     setNotice('');
@@ -435,31 +452,33 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     const isInterest = talent.categories.includes('interest');
     const lastHire = relativeTime(talent.last_hired_at);
     const relationship = relationshipAction(talent);
-    const canApprove = !full && (status === 'candidate' || status === 'accepted');
+    const canApprove = Boolean(current && canHireDemand(current, now)) && !full && (status === 'candidate' || status === 'accepted');
     const statusText = status === 'candidate'
       ? full ? 'Vaga preenchida' : null
       : status === 'awaiting' || status === 'accepted'
         ? full ? 'Equipe já definida' : demandStatusLabels[status]
         : status ? demandStatusLabels[status] : null;
-    return <article key={talent.id} className={`ec-card flex flex-col gap-3 p-4 ${status === 'unavailable' ? 'opacity-60' : ''}`}>
+    return <article key={talent.id} className={`ec-card flex min-w-0 flex-col gap-3 p-4 sm:p-5 ${status === 'unavailable' ? 'opacity-60' : ''}`}>
       <div className="flex min-w-0 items-start gap-3">
         <PersonPhoto talent={talent} onClick={() => openProfile(talent)} />
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-semibold text-gray-950">{talent.name}</h3>
-          <span className="mt-1 inline-flex rounded-md bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-800">{talent.specialties?.[0] || 'Profissional'}</span>
-          <p className="mt-1.5 text-xs text-gray-600">
-            <span className="text-amber-500">⭐</span> <b className="text-gray-900">{score === null || score === undefined ? '—' : Number(score).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</b>
-            {' · '}{talent.reputation?.completed ?? 0} {(talent.reputation?.completed ?? 0) === 1 ? 'operação concluída' : 'operações concluídas'}
-          </p>
+          <h3 className="flex items-center font-semibold text-gray-950"><span className="min-w-0 break-words">{talent.name}</span><ProfessionalVerification userId={talent.id} /></h3>
+          <span className="mt-1 inline-flex max-w-full break-words rounded-md bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-800">{talent.specialties?.[0] || 'Profissional'}</span>
+          <p className="mt-1.5 break-words text-xs text-gray-500">{cityName(talent) || 'Cidade não compartilhada'}</p>
         </div>
       </div>
-      {(isFavorite || isInterest || talent.completed_operations > 0) && <div className="space-y-1 text-xs text-gray-700">
-        {isFavorite && <p>❤️ Favorito</p>}
-        {isInterest && <p>👀 Interesse</p>}
-        {talent.completed_operations > 0 && <p>✅ Trabalhou com você {talent.completed_operations} {talent.completed_operations === 1 ? 'vez' : 'vezes'}</p>}
-        {talent.completed_operations > 0 && lastHire && <p className="text-gray-500">Última contratação: {lastHire}</p>}
+      <div className="grid grid-cols-2 gap-3 rounded-xl bg-gray-50 p-3">
+        <div><p className="text-sm font-semibold text-gray-900"><span aria-hidden="true" className="text-amber-500">★</span> {score === null || score === undefined ? '—' : `${Number(score).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} / 5`}</p><p className="mt-1 text-xs text-gray-500">{score === null || score === undefined ? 'Sem avaliação compartilhada' : 'Avaliação média'}</p></div>
+        <div><p className="text-sm font-semibold text-gray-900">{talent.reputation?.completed ?? 0}</p><p className="mt-1 text-xs text-gray-500">{(talent.reputation?.completed ?? 0) === 1 ? 'Operação concluída' : 'Operações concluídas'}</p></div>
+      </div>
+      <p className="line-clamp-2 break-words text-sm leading-6 text-gray-600">{talent.experience?.trim() || 'Experiência não compartilhada.'}</p>
+      {(isFavorite || isInterest || talent.completed_operations > 0) && <div className="flex flex-wrap gap-2 text-xs text-gray-700">
+        {isFavorite && <Badge>❤️ Favorito</Badge>}
+        {isInterest && <Badge>👀 Interesse</Badge>}
+        {talent.completed_operations > 0 && <Badge tone="success">✅ Trabalhou com você {talent.completed_operations} {talent.completed_operations === 1 ? 'vez' : 'vezes'}</Badge>}
+        {talent.completed_operations > 0 && lastHire && <p className="w-full text-gray-500">Última contratação: {lastHire}</p>}
       </div>}
-      {statusText && <p className="text-xs font-semibold text-gray-700">{statusText}</p>}
+      {statusText && <div><Badge tone={status === 'approved' ? 'success' : status === 'unavailable' ? 'neutral' : 'warning'}>{statusText}</Badge></div>}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
         <div className="flex gap-1">
           <Button variant="ghost" onClick={() => openProfile(talent)} className="px-2 text-xs">Ver perfil</Button>
@@ -470,7 +489,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     </article>;
   };
 
-  const cardGrid = (people: Talent[]) => <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{people.map((talent) => renderCard(talent, statusOf(talent)))}</div>;
+  const cardGrid = (people: Talent[]) => <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">{people.map((talent) => renderCard(talent, statusOf(talent)))}</div>;
   const filteredOut = <p className="text-sm text-gray-500">Nenhum profissional corresponde à busca ou aos filtros.</p>;
 
   const invitedSection = <section aria-labelledby="invited-heading" className="space-y-3">
@@ -478,18 +497,18 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     {visibleInvited.length ? cardGrid(visibleInvited)
       : invitedPeople.length ? filteredOut
         : suggestions.length ? <div className="space-y-3">
-          <p className="text-sm text-gray-600">Nenhum profissional convidado para esta operação.</p>
-          <h3 className="text-sm font-semibold text-gray-900">Sugestões para convidar</h3>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{suggestions.map((talent) => renderCard(talent, null))}</div>
+          <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Seu próximo profissional pode estar aqui</p><p className="mt-1 text-sm leading-6 text-gray-600">Ainda não há convidados nesta operação. Explore os perfis recomendados e envie um convite pelo perfil.</p></div>
+          <h3 className="text-sm font-semibold text-gray-900">Talentos recomendados</h3>
+          <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">{suggestions.map((talent) => renderCard(talent, null))}</div>
         </div>
-          : <div className="text-sm text-gray-600"><p className="font-medium text-gray-800">Nenhum profissional convidado.</p><p>Aguardando candidaturas para esta operação.</p></div>}
+          : <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Nenhum convite por enquanto</p><p className="mt-1 text-sm leading-6 text-gray-600">Os convites e suas respostas aparecerão aqui. Você também pode acompanhar as candidaturas desta operação.</p></div>}
   </section>;
 
   const candidateSection = <section aria-labelledby="candidates-heading" className="space-y-3">
     <SectionHeading id="candidates-heading" count={candidatePeople.length}>Candidatos</SectionHeading>
     {visibleCandidates.length ? cardGrid(visibleCandidates)
       : candidatePeople.length ? filteredOut
-        : <p className="text-sm text-gray-600">Nenhuma candidatura para esta operação ainda.</p>}
+        : <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Aguardando os primeiros candidatos</p><p className="mt-1 text-sm leading-6 text-gray-600">Quando um profissional se candidatar, seu perfil aparecerá aqui para você analisar.</p><Link href={`/restaurant/demands/${current?.id}`} className="mt-2 inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">Ver operação</Link></div>}
   </section>;
 
   const noDemand = <EmptyState title="Nenhuma operação ativa." description="Talentos é organizado pela operação atual. Crie uma operação para receber candidaturas e convidar profissionais."
@@ -511,18 +530,29 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
             <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Talentos</h1>
             <p className="mt-1 text-sm leading-6 text-gray-600">Encontre, convide e contrate profissionais para suas operações.</p>
           </div>
-          {demands.length > 0 && <label className="flex min-w-0 items-center gap-2 text-xs font-semibold text-gray-500">
-            Operação
+        </header>
+
+        {demands.length > 0 && <section aria-label="Operação selecionada" className="ec-card min-w-0 space-y-3 border-orange-200 p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1"><p className="text-xs font-semibold uppercase tracking-widest text-orange-800">Operação selecionada</p><h2 className="mt-1 break-words text-xl font-semibold">{current?.job.title}</h2></div>
+            <label className="block min-w-0 w-full text-xs font-semibold text-gray-500 sm:w-auto">
+            <span className="sr-only">Operação</span>
             <Select value={demandId} onChange={(event) => {
               setDemandId(event.target.value);
               const url = new URL(window.location.href);
               url.searchParams.set('demand', event.target.value);
               window.history.replaceState(null, '', url);
-            }} className="min-h-10 w-auto max-w-[16rem] truncate rounded-full py-2 text-xs text-gray-900">
-              {demands.map((demand) => <option key={demand.id} value={demand.id}>{demand.job.title} · {formatDate(demand.job.job_date)}</option>)}
+            }} className="min-h-11 w-full truncate py-2 text-sm text-gray-900 sm:max-w-64">
+              {availableDemands.map((demand) => <option key={demand.id} value={demand.id}>{demand.job.title} · {formatDate(demand.job.job_date)}{canRecruitDemand(demand, now) ? '' : ' · Recrutamento encerrado'}</option>)}
             </Select>
-          </label>}
-        </header>
+            </label>
+          </div>
+          {current && <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-orange-100 pt-3 text-sm text-gray-600">
+            <span>{formatDate(current.job.job_date)} · {current.job.start_time.slice(0, 5)} às {current.job.end_time.slice(0, 5)}</span>
+            <span className="font-semibold text-gray-900">{Number(current.job.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} / diária</span>
+            <Link href={`/restaurant/demands/${current.id}`} className="inline-flex min-h-11 items-center font-semibold text-orange-800 sm:ml-auto">Ver operação →</Link>
+          </div>}
+        </section>}
 
         <label className="flex min-h-12 items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 text-gray-400">
           <span aria-hidden="true">⌕</span>
@@ -539,12 +569,12 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
           </Button>)}
         </div>}
 
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200">
-          <div role="tablist" aria-label="Talentos da operação" className="-mb-px flex min-w-0 gap-1 overflow-x-auto">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" aria-label="Talentos da operação" className="flex min-w-0 flex-wrap gap-2">
             {tabs.map((item) => <Button key={item.id} type="button" role="tab" aria-selected={tab === item.id} variant="ghost"
               onClick={() => setTab(item.id)}
-              className={`shrink-0 rounded-none border-b-2 px-3 py-2 text-sm font-semibold ${tab === item.id ? 'border-orange-700 text-orange-800' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
-              {item.label} <span className="text-xs font-medium text-gray-400">{loading ? '' : tabCounts[item.id]}</span>
+              className={`shrink-0 rounded-full border px-3 py-2 text-sm font-semibold ${tab === item.id ? 'border-orange-200 bg-orange-50 text-orange-800' : 'border-gray-200 bg-white text-gray-600 hover:text-gray-900'}`}>
+                {item.label} <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold ${tab === item.id ? 'bg-orange-100 text-orange-900' : 'bg-gray-100 text-gray-600'}`}>{loading ? '—' : tabCounts[item.id]}</span>
             </Button>)}
           </div>
           <Button variant="ghost" aria-haspopup="dialog" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}
@@ -563,13 +593,12 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
                 : interestPeople.length ? filteredOut
                   : <EmptyState icon="👀" title="Nenhum profissional marcado como interesse." description="Marque 👀 Interesse nos profissionais que você quer acompanhar." />
               : !current ? noDemand
-                : <div className="space-y-6">
+                : <div className="space-y-4">
                   {full && <div role="status" className="ec-card border-emerald-200 bg-emerald-50 p-4">
                     <p className="font-semibold text-emerald-900">✅ Equipe completa</p>
                     <p className="mt-1 text-sm text-emerald-900/80">Todas as vagas desta operação já foram preenchidas.</p>
                   </div>}
                   {tab !== 'candidates' && invitedSection}
-                  {tab === 'all' && <hr className="border-gray-200" />}
                   {tab !== 'invited' && candidateSection}
                 </div>}
       </section>
@@ -625,7 +654,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
               <div className="relative flex w-full items-end justify-between gap-3 text-white">
                 <div className="flex min-w-0 items-end gap-3">
                   <PersonPhoto talent={selected} large onClick={() => {}} />
-                  <div className="min-w-0 pb-1"><h3 className="truncate text-xl font-semibold">{selected.name}</h3><p className="text-sm text-white/90">{selected.specialties?.[0] || 'Profissional'}</p></div>
+                  <div className="min-w-0 pb-1"><h3 className="flex items-center text-xl font-semibold"><span className="truncate">{selected.name}</span><ProfessionalVerification userId={selected.id} /></h3><p className="text-sm text-white/90">{selected.specialties?.[0] || 'Profissional'}</p></div>
                 </div>
                 <span className="pb-1 text-xs">{location || 'Cidade não compartilhada'}</span>
               </div>
@@ -682,7 +711,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
               {selectedRelationship && <Button variant="secondary" aria-label={selectedRelationship.aria} onClick={selectedRelationship.run} disabled={busy !== ''} className="flex-1 px-3">{selectedRelationship.label}</Button>}
               {current && !full && (selectedStatus === 'candidate' || selectedStatus === 'accepted')
                 && <Button variant="primary" onClick={() => setApproveTarget(selected)} className="flex-1 px-3">Aprovar candidato</Button>}
-              {current && !full && !selectedStatus && !board.applicationByWorker.has(selected.id)
+              {current && recruiting && !full && !selectedStatus && !board.applicationByWorker.has(selected.id)
                 && <Button variant="primary" busy={busy === selected.id} disabled={busy !== ''} onClick={() => void invite(selected)} className="flex-1 px-3">Convidar para {current.job.title}</Button>}
             </div>
           </div>
@@ -691,8 +720,9 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
 
       {approveTarget && <div className="fixed inset-0 z-[60] grid place-items-center bg-gray-950/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setApproveTarget(null); }}>
         <section role="dialog" aria-modal="true" aria-labelledby="approve-heading" className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-3"><div><h2 id="approve-heading" className="font-semibold">Confirmar contratação</h2><p className="mt-1 text-sm text-gray-600">Aprovar {approveTarget.name} confirma a contratação. O chat será liberado após a confirmação.</p></div><Button variant="ghost" aria-label="Fechar" onClick={() => setApproveTarget(null)} className="px-2 text-xl">×</Button></div>
-          <div className="flex justify-end gap-2"><Button onClick={() => setApproveTarget(null)}>Voltar</Button><Button variant="primary" busy={busy === approveTarget.id} onClick={() => void approve()}>Confirmar contratação</Button></div>
+          <div className="flex items-start justify-between gap-3"><div><h2 id="approve-heading" className="font-semibold">Confirmar contratação</h2><p className="mt-1 text-sm text-gray-600">Aprovar {approveTarget.name}<ProfessionalVerification userId={approveTarget.id} /> confirma a contratação. O chat será liberado após a confirmação.</p></div><Button variant="ghost" aria-label="Fechar" onClick={() => setApproveTarget(null)} className="px-2 text-xl">×</Button></div>
+          {!current && <p role="status" className="text-sm text-gray-600">O horário de contratação desta operação foi encerrado.</p>}
+          <div className="flex justify-end gap-2"><Button onClick={() => setApproveTarget(null)}>Voltar</Button><Button variant="primary" disabled={!current} busy={busy === approveTarget.id} onClick={() => void approve()}>Confirmar contratação</Button></div>
         </section>
       </div>}
 

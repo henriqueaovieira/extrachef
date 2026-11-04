@@ -135,6 +135,7 @@ function mount(db) {
   const context = { counts: { messages: 4, notifications: 2 }, error: '', chatError: '', refresh: async () => {} };
   const navigation = { usePathname: () => '/restaurant/dashboard', useSearchParams: () => new URLSearchParams() };
   const shared = {
+    '@/app/components/professional-verification': { default: () => null },
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
     '@/app/components/communication-state': { useCommunication: () => context },
     'next/navigation': navigation,

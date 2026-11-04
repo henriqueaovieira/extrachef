@@ -10,6 +10,7 @@ import { demandDate } from '@/lib/demands';
 interface Invitation {
   id: string; title: string; job_date: string; start_time: string; end_time: string;
   value: number; location_name: string | null; status: string; created_at: string;
+  can_accept: boolean; is_replacement: boolean; expires_at: string;
 }
 
 export default function WorkerInvitations() {
@@ -20,6 +21,13 @@ export default function WorkerInvitations() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const refresh = () => setNow(new Date());
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, []);
   useEffect(() => {
     let mounted = true;
     async function load() {
@@ -58,10 +66,11 @@ export default function WorkerInvitations() {
         {notice && <Toast tone="info">{notice}</Toast>}
         {loading ? <LoadingSkeleton label="Carregando convites..." /> : invitations.length ? invitations.map((invitation) => <article id={`invitation-${invitation.id}`} key={invitation.id} className="scroll-mt-6 space-y-3 rounded-2xl border border-gray-200 bg-white p-5">
           <h2 className="text-lg font-semibold">{invitation.title}</h2>
+          {invitation.is_replacement && <p className="text-sm font-medium">Convite de substituição · aguarda confirmação do restaurante após seu aceite.</p>}
           <p className="text-sm">{demandDate(invitation.job_date)} · {invitation.start_time.slice(0, 5)} às {invitation.end_time.slice(0, 5)}</p>
           <p className="text-sm text-gray-500">{invitation.location_name || 'Local a definir'} · {Number(invitation.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
           {invitation.status === 'pending' ? <div className="flex flex-wrap gap-3">
-            <Button variant="primary" disabled={busy !== null} busy={busy === invitation.id} onClick={() => void respond(invitation, true)} className="px-4 text-sm">Aceitar convite</Button>
+            <Button variant="primary" disabled={busy !== null || !invitation.can_accept || now >= new Date(invitation.expires_at)} busy={busy === invitation.id} onClick={() => void respond(invitation, true)} className="px-4 text-sm">{invitation.can_accept && now < new Date(invitation.expires_at) ? 'Aceitar convite' : 'Convite encerrado'}</Button>
             <Button disabled={busy !== null} onClick={() => void respond(invitation, false)} className="px-4 text-sm">Recusar</Button>
           </div> : <p className="text-sm font-medium text-gray-600">{invitation.status === 'accepted' ? 'Convite aceito · confira suas candidaturas' : 'Convite recusado'}</p>}
         </article>) : !error ? <EmptyState title="Nenhum convite por enquanto." description="Os convites de empresas aparecerão aqui." /> : null}

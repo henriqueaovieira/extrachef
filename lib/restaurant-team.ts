@@ -175,7 +175,9 @@ export async function loadRestaurantTeam(client: SupabaseClient, restaurantId: s
   const pendingReviewJobs = new Set((reviewData as Array<{ job_id: string }>).map((row) => row.job_id));
 
   const candidates = assignments.filter((assignment) => assignment.worker_id !== restaurantId
-    && isActiveAssignment(assignment, pendingReviewJobs, now));
+    && isActiveAssignment(assignment, pendingReviewJobs, now)
+    && !assignments.some((other) => other.job_id === assignment.job_id && other.worker_id !== assignment.worker_id
+      && (!other.interruption || (assignment.interruption && (other.interrupted_at ?? '') > (assignment.interrupted_at ?? '')))));
   if (!candidates.length) return [];
 
   const userIds = [...new Set([restaurantId, ...candidates.map((assignment) => assignment.worker_id)])];

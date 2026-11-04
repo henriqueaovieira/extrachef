@@ -67,6 +67,7 @@ test('formats card day and hours', () => {
 test('loads only valid active hires and skips inconsistent operations', async () => {
   const assignments = [
     { job_id: 'active', worker_id: 'w1', checkout_at: null, interruption: null, interrupted_at: null },
+    { job_id: 'active', worker_id: 'old', checkout_at: null, interruption: 'abandoned', interrupted_at: now.toISOString() },
     { job_id: 'reviewed', worker_id: 'w1', checkout_at: 'x', interruption: null, interrupted_at: null },
     { job_id: 'review', worker_id: 'w1', checkout_at: 'x', interruption: null, interrupted_at: null },
     { job_id: 'self', worker_id: 'r', checkout_at: null, interruption: null, interrupted_at: null },

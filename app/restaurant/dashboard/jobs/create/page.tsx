@@ -1,5 +1,7 @@
 'use client';
 
+import ProfessionalVerification from '@/app/components/professional-verification';
+
 import { Button, Card, Select, TextArea, TextInput, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
@@ -9,6 +11,7 @@ import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { loadPendingReviews, type PendingReview } from '@/lib/operations';
 import { commonSpecialties } from '@/lib/specialties';
 import { emptyWorkLocation, resolveWorkLocation, validCoordinates } from '@/lib/work-location';
+import { recruitmentWindow } from '@/lib/demands';
 
 const states = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
@@ -34,6 +37,9 @@ export default function CreateJobPage() {
 
   const router = useRouter();
   const [supabase] = useState(() => createClient());
+  const publicationWindow = jobDate && startTime && endTime
+    ? recruitmentWindow({ job_date: jobDate, start_time: startTime, end_time: endTime, created_at: new Date().toISOString() })
+    : null;
 
   useEffect(() => {
     let active = true;
@@ -60,6 +66,9 @@ export default function CreateJobPage() {
 
     try {
       const amount = Number(value);
+      if (publicationWindow && publicationWindow.start <= new Date()) {
+        throw new Error('Publique a operação antes do horário de início.');
+      }
       if (value.trim() === '' || !Number.isFinite(amount) || amount <= 0) {
         throw new Error('Informe um valor de diária maior que zero.');
       }
@@ -73,25 +82,35 @@ export default function CreateJobPage() {
         city,
         state,
       });
-      if (!validCoordinates(location.latitude, location.longitude)) {
-        throw new Error('Não foi possível confirmar as coordenadas do endereço.');
-      }
-      const { data: savedLocation, error: locationError } = await supabase.rpc('save_geocoded_work_location', {
-        p_name: 'Local da Operação',
-        p_address: street,
-        p_number: number,
-        p_city: city,
-        p_state: state,
-        p_latitude: location.latitude,
-        p_longitude: location.longitude,
-      });
+      const hasCoordinates = validCoordinates(location.latitude, location.longitude);
+      const { data: savedLocation, error: locationError } = hasCoordinates
+        ? await supabase.rpc('save_geocoded_work_location', {
+          p_name: location.location_name,
+          p_address: location.address,
+          p_number: location.number,
+          p_city: location.city,
+          p_state: location.state,
+          p_latitude: location.latitude,
+          p_longitude: location.longitude,
+        })
+        : await supabase.rpc('save_work_location', {
+          p_name: location.location_name,
+          p_address: location.address,
+          p_number: location.number,
+          p_neighborhood: location.neighborhood,
+          p_city: location.city,
+          p_state: location.state,
+          p_postal_code: location.postal_code,
+        });
       if (locationError) throw new Error(locationError.message);
       if (!savedLocation || typeof savedLocation !== 'object'
         || !('id' in savedLocation) || typeof savedLocation.id !== 'string'
-        || !('revision' in savedLocation) || typeof savedLocation.revision !== 'number'
-        || !('geocoding_status' in savedLocation) || savedLocation.geocoding_status !== 'resolved'
-        || !('latitude' in savedLocation) || !validCoordinates(savedLocation.latitude, savedLocation.longitude)) {
-        throw new Error('O serviço não confirmou o local e as coordenadas da operação.');
+        || !('revision' in savedLocation) || typeof savedLocation.revision !== 'number') {
+        throw new Error('O serviço não confirmou o local da operação.');
+      }
+      if (hasCoordinates && (!('geocoding_status' in savedLocation) || savedLocation.geocoding_status !== 'resolved'
+        || !('latitude' in savedLocation) || !validCoordinates(savedLocation.latitude, savedLocation.longitude))) {
+        throw new Error('O serviço não confirmou as coordenadas da operação.');
       }
       const { data: demandId, error } = await supabase.rpc('create_restaurant_demand', {
         p_title: role,
@@ -100,7 +119,6 @@ export default function CreateJobPage() {
         p_start_time: startTime,
         p_end_time: endTime,
         p_value: amount,
-        p_quantity: 1,
         p_location_source: 'catalog',
         p_work_location_id: savedLocation.id,
         p_location_revision: savedLocation.revision,
@@ -140,8 +158,9 @@ export default function CreateJobPage() {
           <Button onClick={() => { router.push(`/restaurant/demands/${publishedId}`); router.refresh(); }} className="w-full px-4">Pular</Button>
         </section> : pendingReviews.length ? <section className="space-y-3">
           <Toast tone="info">Antes de criar uma nova operação, avalie sua última experiência.</Toast>
-          {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
+          {pendingReviews.map((review) => <div key={review.job_id} className="flex items-center"><Link href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4">Avaliar {review.reviewed_name} · {review.title}</Link><ProfessionalVerification jobId={review.job_id} /></div>)}
         </section> : <form onSubmit={handleCreateJob} className="space-y-4">
+          {publicationWindow?.urgent && publicationWindow.start > new Date() && <Toast tone="info">Publicação urgente: a janela de recrutamento é reduzida e encerra no início da operação.</Toast>}
           <fieldset disabled={loading || !reviewsReady} className="min-w-0 space-y-4">
           <div>
             <label htmlFor="operation-role" className="mb-1 block text-sm font-medium text-gray-700">Função</label>

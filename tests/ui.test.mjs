@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 
@@ -95,6 +95,8 @@ test('worker profile hides retired fields while keeping identity and restaurant 
   for (const label of ['WhatsApp', 'Currículo', 'Certificados']) {
     assert.ok(!workerDetails.includes(`['${label}',`), `Worker overview hides ${label}`);
   }
+  assert.match(overview, /<ProfileVerification profile=\{profile.verification\}/);
+  assert.match(overview, /<VerifiedProfileBadge \/>/);
   assert.match(overview, /role === 'worker' && <div id="confidence"><OperationalReputationView \/>/);
   assert.match(overview.slice(overview.indexOf('} else {')), /\['WhatsApp', data.whatsapp\]/);
 
@@ -103,9 +105,40 @@ test('worker profile hides retired fields while keeping identity and restaurant 
   assert.doesNotMatch(editor, /curr[ií]cul|resume|certificate|certificado|application\/pdf/i);
   assert.match(editor, /input\('Telefone', workerProfile.phone/);
   assert.match(editor, /input\('WhatsApp', restaurantProfile.whatsapp/);
-  for (const file of ['../app/privacy/page.tsx', '../lib/ui/profile-progress.ts']) {
+  for (const file of ['../app/components/profile-verification.tsx', '../app/privacy/page.tsx', '../lib/ui/profile-progress.ts']) {
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), 'utf8'), /whatsapp|resume|curriculum|certificate|curr[ií]culo|certificado/i);
   }
+});
+
+test('confirmed unused components are absent and application has no static or runtime references', () => {
+  const removed = [
+    ['communication-navigation', 'CommunicationNavigation'],
+    ['job-presence-location', 'JobPresenceLocation'],
+    ['work-location-fields', 'WorkLocationFields'],
+  ];
+  for (const [file] of removed) {
+    assert.equal(existsSync(new URL(`../app/components/${file}.tsx`, import.meta.url)), false);
+  }
+  for (const directory of ['../app/', '../lib/']) {
+    const root = new URL(directory, import.meta.url);
+    for (const file of readdirSync(root, { recursive: true })) {
+      if (!/\.[cm]?[jt]sx?$/.test(file)) continue;
+      const content = readFileSync(new URL(file.replaceAll('\\', '/'), root), 'utf8');
+      for (const [module, symbol] of removed) {
+        assert.ok(!content.includes(module) && !content.includes(symbol), `${file} references ${module}`);
+      }
+    }
+  }
+});
+
+test('profile screens do not load or store unused score but retain operational reputation', () => {
+  for (const file of ['../app/components/profile-overview.tsx', '../app/profile/page.tsx']) {
+    const content = readFileSync(new URL(file, import.meta.url), 'utf8');
+    assert.doesNotMatch(content, /\bscore\b/);
+    assert.match(content, file.includes('profile-overview') ? /<OperationalReputationView \/>/ : /<WorkerProfileRedirect \/>/);
+  }
+  const reputation = readFileSync(new URL('../app/components/operational-reputation.tsx', import.meta.url), 'utf8');
+  assert.match(reputation, /reputation\.score/);
 });
 
 async function mountProfileEditor({ role = 'worker', existing = true, saveError = null } = {}) {
@@ -223,14 +256,17 @@ test('rendered worker editor hides retired data and saving preserves historical 
   const editor = await mountProfileEditor();
   const markup = editor.render();
   assert.doesNotMatch(markup, /whatsapp|resume|curriculum|certificate|curr[ií]culo|certificado|Não enviado|arquivo\(s\)|legacy-/i);
-  for (const label of ['CPF', 'RG', 'Data de nascimento', 'Telefone', 'Endereço', 'Especialidades', 'Selfie de verificação']) {
+  for (const label of ['CPF', 'RG', 'Data de nascimento', 'Telefone', 'Endereço', 'Especialidades', 'Perfil Verificado']) {
     assert.ok(markup.includes(label), `Keeps ${label}`);
   }
   assert.match(markup, /100% preenchido/);
-  assert.equal(editor.files().length, 2);
+  assert.match(markup, /href="\/worker\/profile"[^>]*>Cancelar<\/a>/);
+  assert.match(markup, /href="\/worker\/profile#verification"/);
+  assert.equal(editor.files().length, 1);
   assert.equal(editor.files()[0].props.accept, 'image/jpeg,image/png,image/webp');
   editor.fill('Telefone', '11888888888');
   assert.match(await editor.save(), /Perfil salvo com sucesso/);
+  assert.match(editor.render(), /href="\/worker\/profile"[^>]*>Cancelar<\/a>/);
   const saved = editor.calls.find((call) => call.kind === 'upsert');
   assert.equal(saved.table, 'worker_profiles');
   assert.equal(saved.payload.phone, '11888888888');
@@ -367,7 +403,7 @@ test('worker home and profile screens do not invent scores or replace failed rea
     const profile = readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.doesNotMatch(profile, /Number\(profile\.score \?\? 0\)/);
     assert.doesNotMatch(profile, /profile\.score\.toFixed/);
-    assert.match(profile, /OperationalReputationView/);
+    assert.match(profile, path.includes('profile-overview') ? /OperationalReputationView/ : /WorkerProfileRedirect/);
   }
 });
 
@@ -391,13 +427,18 @@ test('all requested account screens render the shared DashboardLogo component', 
     '../app/worker/dashboard/page.tsx',
     '../app/worker/applications/page.tsx',
     '../app/worker/messages/page.tsx',
-    '../app/worker/profile/page.tsx',
-    '../app/worker/profile/details/page.tsx',
+    '../app/components/profile-editor.tsx',
   ];
   for (const path of screens) {
     const source = readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.ok(/DashboardLogo|MoreNavigation role=|ProfileOverview role=/.test(source), path);
   }
+  const workerPage = readFileSync(new URL('../app/worker/profile/page.tsx', import.meta.url), 'utf8');
+  assert.match(workerPage, /<Suspense/);
+  assert.match(workerPage, /<WorkerProfileExperience \/>/);
+  const experience = readFileSync(new URL('../app/components/worker-profile-experience.tsx', import.meta.url), 'utf8');
+  assert.match(experience, /<ProfileEditor role="worker" \/>/);
+  assert.match(experience, /<ProfileOverview role="worker" \/>/);
 
   for (const path of [
     '../app/components/profile-overview.tsx',
@@ -448,8 +489,9 @@ test('worker messages index links only approved applications with existing messa
   assert.match(messages, /DashboardAvatar/);
   assert.match(messages, /DashboardNav role="worker" showOnDesktop/);
   assert.doesNotMatch(messages, /rpc\(|\.insert\(|\.update\(/);
-  const communicationNavigation = readFileSync(new URL('../app/components/communication-navigation.tsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(communicationNavigation, /worker\/applications#chats/);
+  const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
+  assert.match(navigation, /href: '\/worker\/messages'/);
+  assert.doesNotMatch(navigation, /worker\/applications#chats/);
 });
 
 test('worker monthly earnings are limited to completed, confirmed payments in the current local month', () => {

@@ -27,6 +27,30 @@ const before = new Date('2026-11-01T10:00:00-03:00');
 const build = (jobs, applications = [], reserves = [], now = before) => domain.buildDemands(jobs, applications, reserves, now);
 const application = (job_id, worker_id, status = 'pending') => ({ job_id, worker_id, status });
 
+test('recruitment closes at five hours exactly, while existing candidates remain hireable until start', () => {
+  const regular = job('a', { created_at: '2026-11-11T00:00:00-03:00' });
+  const at = time => new Date(`2026-11-12T${time}-03:00`);
+  assert.equal(domain.recruitmentWindow(regular).cutoff.toISOString(),at('05:00:00').toISOString());
+  for (const [time, open, hire] of [
+    ['04:59:59',true,true],['05:00:00',false,true],['05:00:01',false,true],
+    ['09:59:59',false,true],['10:00:00',false,false],['10:00:01',false,false],['23:00:00',false,false],
+  ]) {
+    const [demand] = build([regular], [application('a','worker')], [], at(time));
+    assert.equal(domain.canRecruitJob(regular,at(time)),open,time);
+    assert.equal(domain.canRecruitDemand(demand,at(time)),open,time);
+    assert.equal(domain.canHireDemand(demand,at(time)),hire,time);
+    assert.equal(domain.filterDemands([demand],'hiring',at(time)).length,Number(open));
+    assert.equal(demand.applications.length,1);
+  }
+  const urgent = { ...regular,created_at: at('07:00:00').toISOString() };
+  assert.equal(domain.recruitmentWindow(urgent).urgent,true);
+  assert.equal(domain.canRecruitJob(urgent,at('09:59:59')),true);
+  assert.equal(domain.canRecruitJob(urgent,at('10:00:00')),false);
+  assert.equal(domain.canRecruitJob({...urgent,status:'filled'},at('09:00:00')),false);
+  assert.equal(domain.canRecruitJob({...urgent,recruitment_blocked:true},at('09:00:00')),false);
+  assert.equal(domain.canRecruitJob({...urgent,demand_archived_at: at('08:00:00').toISOString()},at('09:00:00')),false);
+});
+
 test('explicit identity preserves distinct operations with identical names and represents 1, 2, 20 and 50 professionals identically', () => {
   for (const quantity of [1, 2, 20, 50]) {
     const jobs = Array.from({ length: quantity }, (_, i) => job(String(i)));
@@ -141,7 +165,7 @@ test('cards are accessible full-page links with the same operational structure a
 test('creation and details wire persistent RPCs and never mutate job columns directly', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.match(create, /rpc\('create_restaurant_demand'/);
-  assert.match(create, /p_quantity: 1/);
+  assert.doesNotMatch(create, /p_quantity/);
   assert.match(create, /p_location_source: 'catalog'/);
   assert.match(create, /p_work_location_id: savedLocation\.id/);
   const card = source('../app/components/demand-card.tsx');

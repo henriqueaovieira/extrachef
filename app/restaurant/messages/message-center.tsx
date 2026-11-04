@@ -7,6 +7,7 @@ import { Badge, Button, Card, EmptyState, LoadingSkeleton, TextInput, Toast } fr
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { DashboardLogo } from '@/app/components/dashboard-identity';
 import { createClient } from '@/lib/supabase/client';
+import ProfessionalVerification from '@/app/components/professional-verification';
 import { signDemandPhotos, type DemandPerson } from '@/lib/demand-detail';
 import { loadRestaurantMessageInbox, type RestaurantMessageConversation, type RestaurantOperationalStatus } from '@/lib/restaurant-message-inbox';
 
@@ -160,14 +161,15 @@ export default function RestaurantMessageCenter() {
         {loading ? <div className="space-y-3">{[0, 1, 2].map((index) => <LoadingSkeleton key={index} label="Carregando conversas operacionais..." />)}</div>
           : error ? null
             : filtered.length ? <div className="space-y-3">
-              {filtered.map((conversation) => <Card as="article" key={conversation.job_id} className="p-0 transition hover:border-orange-300">
+              {filtered.map((conversation) => <Card as="article" key={conversation.job_id} className="relative p-0 transition hover:border-orange-300">
                 <Link href={`/chat/${conversation.job_id}`}
                   aria-label={`${conversation.worker_name}, ${conversation.worker_specialty ?? 'profissional'}, ${conversation.demand_title}, ${conversation.operational_status}${conversation.unread_count ? `, ${conversation.unread_count} mensagens não lidas` : ''}`}
-                  className="grid gap-3 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:p-5">
+                  className="absolute inset-0 rounded-xl focus-visible:outline-2 focus-visible:outline-orange-700" />
+                <div className="pointer-events-none grid gap-3 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:p-5">
                   <ConversationPhoto conversation={conversation} />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <h2 className="font-semibold text-gray-950">{conversation.worker_name}</h2>
+                      <h2 className="flex items-center font-semibold text-gray-950">{conversation.worker_name}<ProfessionalVerification userId={conversation.worker_id} /></h2>
                       <span className="text-xs text-gray-500">{conversation.worker_specialty ?? 'Profissional'}</span>
                     </div>
                     <p className="mt-1 truncate text-sm font-medium text-gray-800">{conversation.demand_title}</p>
@@ -185,7 +187,7 @@ export default function RestaurantMessageCenter() {
                       </Badge>}
                     </div>
                   </div>
-                </Link>
+                </div>
               </Card>)}
             </div> : <EmptyState
               icon={<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-9"><path d="M5 8.5A3.5 3.5 0 0 1 8.5 5h15A3.5 3.5 0 0 1 27 8.5v10a3.5 3.5 0 0 1-3.5 3.5H16l-6 5v-5h-1.5A3.5 3.5 0 0 1 5 18.5z" /><path d="M10 12h12m-12 4h8" /></svg>}

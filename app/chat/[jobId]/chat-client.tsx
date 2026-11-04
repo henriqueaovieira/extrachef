@@ -10,7 +10,9 @@ import NotificationBell from '@/app/components/notification-bell';
 import { useCommunication } from '@/app/components/communication-state';
 import { Badge } from '@/app/components/ui';
 import { loadDemandPeople, signDemandPhotos, type DemandPerson } from '@/lib/demand-detail';
-import type { OperationalContext } from '@/lib/operations';
+import { readOperationalContext, type OperationalContext } from '@/lib/operations';
+import OperationFlow from '@/app/components/operation-flow';
+import ProfessionalVerification from '@/app/components/professional-verification';
 
 interface ChatContext {
   job_title: string;
@@ -40,7 +42,6 @@ interface RestaurantOperation {
   rating: number | null;
   completed_operations: number | null;
   photoUrl: string | null;
-  operationHref: string;
 }
 
 interface OperationalTimelineEvent {
@@ -60,6 +61,7 @@ function sortMessages(messages: Message[]) {
 }
 
 function operationStatus(phase: string) {
+  if (phase === 'unavailable') return 'Status indisponível';
   if (phase === 'confirmed') return 'Contratado';
   if (['checkin', 'absence_pending'].includes(phase)) return 'Check-in pendente';
   if (phase === 'working') return 'Em operação';
@@ -91,6 +93,9 @@ export default function ChatClient({ jobId }: { jobId: string }) {
   const [operation, setOperation] = useState<RestaurantOperation | null>(null);
   const [systemEvents, setSystemEvents] = useState<OperationalTimelineEvent[]>([]);
   const [operationError, setOperationError] = useState('');
+  const [flowContext, setFlowContext] = useState<OperationalContext | null>(null);
+  const [flowError, setFlowError] = useState('');
+  const [flowNow, setFlowNow] = useState(() => new Date());
   const [currentUserId, setCurrentUserId] = useState('');
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
@@ -101,6 +106,39 @@ export default function ChatClient({ jobId }: { jobId: string }) {
   const [readRetry, setReadRetry] = useState(0);
   const { markRead, error: communicationError } = useCommunication();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const relationshipRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!context) return;
+    let active = true;
+    let refreshing = false;
+    async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const { data, error } = await supabase.rpc('operational_context', { p_job_id: jobId });
+        if (error) throw new Error(error.message);
+        const value = readOperationalContext(data);
+        if (active && (['cancelled', 'absent', 'abandoned'].includes(value.phase)
+          || (relationshipRef.current && value.assignment_id && relationshipRef.current !== value.assignment_id))) {
+          setMessages([]); setContext(null);
+          setErrorMessage('A contratação desta operação mudou. Reabra a conversa pelas suas operações.');
+          return;
+        }
+        if (value.assignment_id) relationshipRef.current = value.assignment_id;
+        if (active) { setFlowContext(value); setFlowNow(new Date()); setFlowError(''); }
+      } catch (error) {
+        if (active) {
+          setFlowContext(null);
+          setFlowError(error instanceof Error ? error.message : 'Não foi possível carregar as etapas da operação.');
+        }
+      } finally { refreshing = false; }
+    }
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    window.addEventListener('focus', refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [context, jobId, supabase]);
 
   useEffect(() => {
     let isMounted = true;
@@ -164,7 +202,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
             supabase.from('jobs').select('demand_id, job_date, start_time, end_time, location_name, work_address, work_neighborhood, work_city, work_state').eq('id', jobId).maybeSingle(),
             supabase.from('applications').select('worker_id').eq('job_id', jobId).in('status', ['approved', 'in_progress', 'completed']).maybeSingle(),
             supabase.rpc('operational_context', { p_job_id: jobId }),
-            supabase.from('operational_assignments').select('hired_at, checkin_at, paid_at, receipt_confirmed_at, payment_disputed_at, checkout_at, interruption, interrupted_at').eq('job_id', jobId).maybeSingle(),
+            supabase.from('operational_assignments').select('hired_at, checkin_at, paid_at, receipt_confirmed_at, payment_disputed_at, checkout_at, interruption, interrupted_at').eq('job_id', jobId).is('interruption', null).maybeSingle(),
           ]);
           if (jobResult.error || applicationResult.error) {
             if (isMounted) setOperationError('Não foi possível carregar o contexto da operação.');
@@ -173,10 +211,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
             const workerId = applicationResult.data.worker_id;
             const operationContext = operationResult.error ? null : operationResult.data as OperationalContext | null;
             if (operationResult.error && isMounted) setOperationError('Não foi possível atualizar o status operacional.');
-            const phase = operationContext?.phase ?? 'confirmed';
-            const operationHref = ['payment', 'receipt', 'payment_disputed'].includes(phase)
-              ? `/payment/${jobId}`
-              : ['checkout', 'completed'].includes(phase) ? `/checkout/${jobId}` : `/checkin/${jobId}`;
+            const phase = operationContext?.phase ?? 'unavailable';
             const location = [job.location_name, job.work_address, job.work_neighborhood, [job.work_city, job.work_state].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || 'Local a definir';
             let person: DemandPerson | undefined;
             try {
@@ -218,7 +253,6 @@ export default function ChatClient({ jobId }: { jobId: string }) {
                 rating: person?.reputation?.average_rating ?? person?.score ?? null,
                 completed_operations: person?.reputation?.completed ?? null,
                 photoUrl: person?.photoUrl ?? null,
-                operationHref,
               });
               setSystemEvents(events);
             }
@@ -381,7 +415,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
             <Image src={operation.photoUrl} alt="" fill unoptimized sizes="44px" className="object-cover" />
           </span>}
           <div className="min-w-0">
-            <h1 className="truncate font-semibold text-gray-900">{context?.participant_name ?? 'Conversa'}</h1>
+            <h1 className="flex items-center font-semibold text-gray-900"><span className="truncate">{context?.participant_name ?? 'Conversa'}</span>{context?.participant_role === 'worker' && <ProfessionalVerification jobId={jobId} />}</h1>
             <p className="truncate text-xs text-gray-500">
               {operation?.specialty ?? 'Profissional'}
               {operation?.rating !== null && operation?.rating !== undefined ? ` · ★ ${Number(operation.rating).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}` : ''}
@@ -391,7 +425,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
         </header> : <header className="flex items-center gap-4 border-b border-gray-200 px-4 py-4 sm:px-6">
           <Link href={backHref} aria-label="Voltar" className="flex size-12 shrink-0 items-center justify-center rounded-full border border-gray-200 text-lg text-gray-600 transition hover:bg-gray-50">←</Link>
           <div className="min-w-0">
-            <h1 className="truncate font-semibold text-gray-900">{context?.participant_name ?? 'Conversa'}</h1>
+            <h1 className="flex items-center font-semibold text-gray-900"><span className="truncate">{context?.participant_name ?? 'Conversa'}</span>{context?.participant_role === 'worker' && <ProfessionalVerification jobId={jobId} />}</h1>
             <p className="truncate text-sm text-gray-500">{loading ? 'Carregando conversa...' : context?.job_title ?? 'Chat do plantão'}</p>
           </div>
           {context && <span className="ml-auto hidden rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-800 sm:inline-flex">{context.participant_role === 'restaurant' ? 'Restaurante' : 'Trabalhador'}</span>}
@@ -412,9 +446,14 @@ export default function ChatClient({ jobId }: { jobId: string }) {
           {operation && <div className="flex flex-wrap gap-2">
             <Link href={`/restaurant/demands/${operation.demand_id}?view=profile&person=${operation.worker_id}`} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Perfil</Link>
             <Link href={`/restaurant/demands/${operation.demand_id}`} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Operação</Link>
-            <Link href={operation.operationHref} className="ec-button ec-button--secondary min-h-10 px-3 text-xs">Ver Operação</Link>
           </div>}
         </section>}
+
+        {context && <div className="border-b border-gray-200 px-4 py-3 sm:px-6">
+          {flowContext ? <OperationFlow jobId={jobId} role={flowContext.role} hired assignment={flowContext}
+            startsAt={new Date(flowContext.starts_at)} endsAt={new Date(flowContext.ends_at)} now={flowNow} phase={flowContext.phase} showChat={false} />
+            : <p role="status" className="text-sm text-gray-600">{flowError || 'Carregando etapas da operação...'}</p>}
+        </div>}
 
         <div className="flex-1 space-y-4 overflow-y-auto bg-[#f8f9f7] px-4 py-5 sm:px-6">
           {loading ? (
@@ -438,7 +477,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
               const isOwnMessage = message.sender_id === currentUserId;
               return <article key={item.id} className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
                 <div className={`flex max-w-[85%] flex-col gap-1 sm:max-w-[72%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
-                  <span className="px-1 text-xs text-gray-500">{isOwnMessage ? 'Você' : context?.participant_name}</span>
+                  <span className="flex items-center px-1 text-xs text-gray-500">{isOwnMessage ? 'Você' : context?.participant_name}<ProfessionalVerification userId={message.sender_id} /></span>
                   <div className={`rounded-2xl px-4 py-3 ${isOwnMessage ? 'rounded-br-sm bg-orange-700 text-white' : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800'}`}>
                     <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>
                   </div>
@@ -458,6 +497,7 @@ export default function ChatClient({ jobId }: { jobId: string }) {
                   <div className={`max-w-[85%] sm:max-w-[72%] ${isOwnMessage ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
                     <span className="px-1 text-xs text-gray-500">
                       {isOwnMessage ? 'Você' : context?.participant_name}
+                      <ProfessionalVerification userId={message.sender_id} />
                     </span>
                     <div className={`rounded-2xl px-4 py-3 ${isOwnMessage ? 'rounded-br-sm bg-emerald-700 text-white' : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800'}`}>
                       <p className="whitespace-pre-wrap break-words text-sm">{message.content}</p>

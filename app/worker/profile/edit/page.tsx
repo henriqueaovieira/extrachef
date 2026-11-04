@@ -1,5 +1,5 @@
-import ProfileEditor from '@/app/components/profile-editor';
+import WorkerProfileRedirect from '@/app/components/worker-profile-redirect';
 
 export default function EditWorkerProfilePage() {
-  return <ProfileEditor role="worker" />;
+  return <WorkerProfileRedirect edit />;
 }

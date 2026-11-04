@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 const source = (name) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8');
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 
-test('new catalog operations require persisted geocoded coordinates and old jobs remain unchanged', async (t) => {
+test('catalog operations persist without coordinates and retain geocoded coordinates when available', async (t) => {
   const db = new PGlite();
   t.after(() => db.close());
   await db.exec(`
@@ -49,6 +49,8 @@ test('new catalog operations require persisted geocoded coordinates and old jobs
 
   await db.exec('RESET ROLE;');
   await db.exec(source('20261019010000_geocoded_operation_locations.sql'));
+  await db.exec(source('20261103010000_optional_operation_geocoding.sql'));
+  await db.exec(source('20261104080000_single_vacancy_operations.sql'));
   await db.exec(`SET request.jwt.claim.sub='${id(1)}'; SET ROLE authenticated;`);
   const [location] = await query(`SELECT * FROM public.save_geocoded_work_location(
     'Local da Operação','Rua das Flores','120','São Paulo','SP',-23.55,-46.63)`);
@@ -59,7 +61,7 @@ test('new catalog operations require persisted geocoded coordinates and old jobs
   assert.equal(location.coordinate_source, 'geocoder');
 
   const [created] = await query(`SELECT public.create_restaurant_demand(
-    'Garçom','Detalhes','2099-01-02','18:00','23:00',150,1,'catalog',$1,$2) AS id`,
+    'Garçom','Detalhes','2099-01-02','18:00','23:00',150,'catalog',$1,$2) AS id`,
   [location.id, location.revision]);
   const [snapshot] = await query('SELECT * FROM public.jobs WHERE demand_id=$1', [created.id]);
   assert.equal(snapshot.location_status, 'ready');
@@ -69,9 +71,14 @@ test('new catalog operations require persisted geocoded coordinates and old jobs
 
   const [pending] = await query(`SELECT * FROM public.save_work_location(
     'Local pendente','Rua sem coordenada','10','','São Paulo','SP','')`);
-  await assert.rejects(query(`SELECT public.create_restaurant_demand(
-    'Garçom','Detalhes','2099-01-03','18:00','23:00',150,1,'catalog',$1,$2)`,
-  [pending.id, pending.revision]), /Geocodifique o local antes de publicar/);
+  const [pendingDemand] = await query(`SELECT public.create_restaurant_demand(
+    'Garçom','Detalhes','2099-01-03','18:00','23:00',150,'catalog',$1,$2) AS id`,
+  [pending.id, pending.revision]);
+  const [pendingSnapshot] = await query('SELECT * FROM public.jobs WHERE demand_id=$1', [pendingDemand.id]);
+  assert.equal(pendingSnapshot.location_status, 'pending_coordinates');
+  assert.equal(pendingSnapshot.work_address, 'Rua sem coordenada');
+  assert.equal(pendingSnapshot.work_latitude, null);
+  assert.equal(pendingSnapshot.work_longitude, null);
   await assert.rejects(query(`SELECT public.save_geocoded_work_location(
     'Local inválido','Rua inválida','10','São Paulo','SP',91,-46)`,
   ), /coordenadas válidas/);

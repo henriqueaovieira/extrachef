@@ -193,7 +193,7 @@ export default function NotificationCenter() {
           </Button>
         </header>
 
-        <Link href={role === 'restaurant' ? '/restaurant/candidates#chats' : '/worker/messages'} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 bg-white px-4 font-semibold text-gray-800">
+        <Link href={role === 'restaurant' ? '/restaurant/messages' : '/worker/messages'} className="inline-flex min-h-12 items-center rounded-lg border border-gray-300 bg-white px-4 font-semibold text-gray-800">
           Mensagens {counts.messages !== null && counts.messages > 0 ? `(${counts.messages})` : ''}
         </Link>
         <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Filtrar notificações">

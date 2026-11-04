@@ -7,6 +7,8 @@ import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
 import { phaseLabels, readOperationalContext, type OperationalContext } from '@/lib/operations';
 import { getDeviceCoordinates } from '@/lib/geolocation';
+import ProfessionalVerification from '@/app/components/professional-verification';
+import OperationFlow from '@/app/components/operation-flow';
 
 export default function OperationalPanel({ jobId }: { jobId: string }) {
   const [supabase] = useState(() => createClient());
@@ -32,7 +34,10 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
         const value = readOperationalContext(data);
         if (active) { setContext(value); setError(''); }
       } catch (error) {
-        if (active) setError(error instanceof Error ? error.message : 'Não foi possível carregar a operação.');
+        if (active) {
+          setContext(null);
+          setError(error instanceof Error ? error.message : 'Não foi possível carregar a operação.');
+        }
       } finally {
         refreshing = false;
         if (active) setLoading(false);
@@ -58,8 +63,8 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
       const { data, error } = await supabase.rpc(rpc, parameters);
       if (error) throw new Error(error.message);
       if (rpc === 'interrupt_operational_assignment') {
-        if (typeof data !== 'string') throw new Error('O serviço não confirmou a reabertura.');
-        setNotice('Ocorrência registrada. A posição foi reaberta para substituição.');
+        if (typeof data !== 'string') throw new Error('O serviço não confirmou a ocorrência.');
+        setNotice('Ocorrência registrada. O restaurante deve decidir entre encerrar a operação ou buscar substituto entre os candidatos já vinculados.');
         setInterruption(null);
         setRetry((value) => value + 1);
       } else {
@@ -98,11 +103,13 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
           <article className="space-y-5 rounded-2xl border border-gray-200 bg-white p-5">
             <div>
               <h2 className="text-xl font-semibold">{context.title}</h2>
-              {!worker && <p className="mt-1 text-sm font-medium">{context.worker_name}</p>}
+              {!worker && <p className="mt-1 flex items-center text-sm font-medium">{context.worker_name}<ProfessionalVerification jobId={jobId} /></p>}
               <p className="mt-1 text-sm text-gray-600">{context.location}</p>
               <p className="mt-1 text-sm text-gray-600">{new Date(context.starts_at).toLocaleString('pt-BR')} — {new Date(context.ends_at).toLocaleString('pt-BR')}</p>
             </div>
             <p role="status" className="rounded-xl bg-orange-50 p-4 font-semibold text-orange-900">{phaseLabels[context.phase] ?? context.phase}</p>
+            <OperationFlow jobId={jobId} role={context.role} hired assignment={context}
+              startsAt={new Date(context.starts_at)} endsAt={new Date(context.ends_at)} now={new Date(now)} phase={context.phase} showAction={false} />
             {context.phase === 'confirmed' && <p className="text-sm text-gray-600">No dia da operação, realize o check-in ao chegar.</p>}
             {context.phase === 'working' && !ended && <p className="text-sm text-gray-600">O trabalho está em andamento. Ao final do horário, o pagamento será a próxima etapa.</p>}
             {arriving && <p className="text-sm text-gray-600">{worker ? 'Apresente seu código à empresa. Ela confirma sua chegada digitando o código no aplicativo dela.' : 'Confira a chegada e digite o código apresentado pelo profissional. Um atraso não é uma ausência confirmada.'}</p>}
@@ -161,14 +168,10 @@ export default function OperationalPanel({ jobId }: { jobId: string }) {
               </div>
             </details>}
             {interruption && <div role="alert" className="space-y-3 rounded-xl bg-red-50 p-4">
-              <p className="text-sm text-red-900">Confirmar {interruption === 'absent' ? 'ausência' : interruption === 'abandoned' ? 'abandono' : 'cancelamento'}? Esta ocorrência será registrada no histórico e a posição será reaberta.</p>
+              <p className="text-sm text-red-900">Confirmar {interruption === 'absent' ? 'ausência' : interruption === 'abandoned' ? 'abandono' : 'cancelamento'}? Esta ocorrência será registrada no histórico. O recrutamento não será reaberto.</p>
               <Button variant="danger" busy={busy} onClick={() => void mutate('interrupt_operational_assignment', { p_reason: interruption })} className="px-3">Confirmar ocorrência</Button>
               <Button disabled={busy} onClick={() => setInterruption(null)} className="ml-2 px-3">Voltar</Button>
             </div>}
-            {!['cancelled', 'absent', 'abandoned'].includes(context.phase) && <details className="border-t border-gray-100 pt-3">
-              <summary className="cursor-pointer py-2 text-sm text-gray-600">Avisos e imprevistos</summary>
-              <Link href={`/chat/${jobId}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Conversar</Link>
-            </details>}
           </article>
         )}
       </section>

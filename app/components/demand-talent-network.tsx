@@ -9,7 +9,7 @@ import { loadDemandPeople, signDemandPhotos, type DemandPerson } from '@/lib/dem
 
 const categories = [['all', 'Todos'], ['contact', 'Contatos'], ['known', 'Conhecidos'], ['recurring', 'Recorrentes'], ['favorite', 'Favoritos'], ['partner', 'Parceiros']] as const;
 
-export default function DemandTalentNetwork({ demandId }: { demandId: string }) {
+export default function DemandTalentNetwork({ demandId, canInvite }: { demandId: string; canInvite: boolean }) {
   const [people, setPeople] = useState<DemandPerson[]>([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -40,6 +40,10 @@ export default function DemandTalentNetwork({ demandId }: { demandId: string }) 
 
   const mutate = async (person: DemandPerson, category?: string) => {
     if (busy) return;
+    if (!category && !canInvite) {
+      setError('O recrutamento desta operação foi encerrado.');
+      return;
+    }
     setBusy(person.id); setError(''); setNotice('');
     try {
       const enabled = category ? !person.categories.includes(category) : false;
@@ -72,7 +76,7 @@ export default function DemandTalentNetwork({ demandId }: { demandId: string }) 
           <DemandPersonSummary person={person} profileHref={`/restaurant/demands/${demandId}?view=profile&person=${person.id}`} />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Link href={`/restaurant/demands/${demandId}?view=profile&person=${person.id}`} className="inline-flex min-h-11 items-center text-xs font-semibold">Ver Perfil</Link>
-            <Button variant="primary" disabled={busy !== null || person.invitation_status !== null} busy={busy === person.id} onClick={() => void mutate(person)} className="px-4 text-xs">{person.invitation_status === 'pending' ? 'Convite enviado' : person.invitation_status === 'accepted' ? 'Convite aceito' : person.invitation_status === 'declined' ? 'Convite recusado' : 'Convidar'}</Button>
+            <Button variant="primary" disabled={!canInvite || busy !== null || person.invitation_status !== null} busy={busy === person.id} onClick={() => void mutate(person)} className="px-4 text-xs">{!canInvite ? 'Recrutamento encerrado' : person.invitation_status === 'pending' ? 'Convite enviado' : person.invitation_status === 'accepted' ? 'Convite aceito' : person.invitation_status === 'declined' ? 'Convite recusado' : 'Convidar'}</Button>
           </div>
           <details className="border-t border-gray-100"><summary className="min-h-11 cursor-pointer content-center text-xs text-gray-500">Organizar na minha rede</summary>
             <div className="flex flex-wrap gap-2">{categories.filter(([value]) => value !== 'all' && value !== 'recurring').map(([value, label]) => <Button key={value} aria-pressed={person.categories.includes(value)} disabled={busy !== null} onClick={() => void mutate(person, value)} className={`px-3 text-xs ${person.categories.includes(value) ? 'bg-orange-50' : ''}`}>{label}</Button>)}</div>

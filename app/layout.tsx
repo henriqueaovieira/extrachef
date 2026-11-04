@@ -5,6 +5,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import PwaInstallPrompt from "@/app/components/pwa-install-prompt";
 import NotificationExperience from "@/app/components/notification-experience";
 import SessionGuard from "@/app/components/session-guard";
+import { ProfessionalVerificationProvider } from "@/app/components/professional-verification";
 import { Suspense } from "react";
 import "./globals.css";
 
@@ -52,9 +53,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         <Suspense fallback={<LoadingSkeleton label="Carregando..." />}>
-          <NotificationExperience>
-            <SessionGuard>{children}</SessionGuard>
-          </NotificationExperience>
+          <ProfessionalVerificationProvider>
+            <NotificationExperience>
+              <SessionGuard>{children}</SessionGuard>
+            </NotificationExperience>
+          </ProfessionalVerificationProvider>
         </Suspense>
         <PwaInstallPrompt />
       </body>

@@ -1,5 +1,7 @@
 'use client';
 
+import ProfessionalVerification from '@/app/components/professional-verification';
+
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Badge, Button, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
@@ -113,7 +115,7 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
                       className="absolute inset-0 z-0 rounded-[1.125rem]" />
                     <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">{heading(hire)}</p>
                     <div>
-                      <h2 className="truncate text-base font-semibold text-gray-950">{hire.context.worker_name}</h2>
+                      <h2 className="flex items-center text-base font-semibold text-gray-950"><span className="truncate">{hire.context.worker_name}</span><ProfessionalVerification jobId={hire.context.job_id} /></h2>
                       <p className="mt-0.5 text-sm text-gray-600">{hours(hire)}</p>
                     </div>
                     <Badge tone={hire.tone}>{hire.label}</Badge>
@@ -139,7 +141,7 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">{heading(selected)}</p>
-              <p className="text-lg font-semibold">{selected.context.worker_name}</p>
+              <p className="flex items-center text-lg font-semibold">{selected.context.worker_name}<ProfessionalVerification jobId={selected.context.job_id} /></p>
               <p className="text-sm text-gray-600">{hours(selected)}</p>
               <div className="pt-2"><Badge tone={selected.tone}>{selected.label}</Badge></div>
               {selected.detail && <p className="pt-1 text-sm text-gray-600">{selected.detail}</p>}

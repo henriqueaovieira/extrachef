@@ -1,5 +1,18 @@
 # ExtraChef: Auditoria QA da comunicação
 
+## Compatibilidade de navegacao apos consolidacao
+
+A entrada oficial da caixa restaurante e `/restaurant/messages`, inclusive no
+atalho Mensagens da Central. Candidates com `?view=messages` ou `#chats` agora
+encaminha no cliente com `replace`, preservando demais parametros; o hash
+legado e consumido. Candidates normal e `?demand=` permanecem em Talentos.
+Nao ha segunda montagem da caixa em candidatos. Avisos/SQL antigos continuam
+intactos; a compatibilidade nao altera Push, leitura, contadores ou contratacao.
+
+Regressao: `node --test tests/message-navigation.test.mjs tests/restaurant-message-ui.test.mjs tests/communication.test.mjs`.
+Mapa atual: [routes.md](./routes.md). O restante deste arquivo conserva a
+auditoria historica e nao comprova o estado atual do ambiente remoto.
+
 Data da auditoria local: 15/10/2026
 
 ## Resultado executivo
@@ -114,7 +127,7 @@ O popup não é reconstruído ao entrar no app: só nasce de mensagem nova, rece
 ## Arquivos da separação
 
 - Estado e contagens: `lib/communication.ts`, `app/components/communication-state.tsx`, `app/components/notification-experience.tsx`, `app/layout.tsx`.
-- Navegação: `notification-bell.tsx`, `communication-navigation.tsx`, `mobile-bottom-nav.tsx` em `app/components`, headers dos dashboards, candidaturas e chat.
+- Navegação: `notification-bell.tsx`, `mobile-bottom-nav.tsx` em `app/components`, headers dos dashboards, candidaturas e chat. O componente sem consumidores `communication-navigation.tsx` foi removido na [sprint de consolidação](./consolidation-report.md).
 - Central: `app/components/notification-center.tsx` (filtros sem mensagens, mutações restritas, contador global, carregar mais, falhas explícitas).
 - Leitura: `app/chat/[jobId]/chat-client.tsx`.
 - Push: `app/api/push/dispatch/route.ts` (confirma registro atual, não envia aviso lido/excluído), `public/sw.js` (app visível vs. background e tag por notificação).

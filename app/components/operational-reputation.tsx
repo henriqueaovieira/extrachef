@@ -16,7 +16,7 @@ export function ReputationDetails({ reputation }: { reputation: OperationalReput
         ['Pontualidade', reputation.punctuality === null ? 'Sem compromissos registrados' : `${Number(reputation.punctuality).toLocaleString('pt-BR')}%`],
         ['Avaliação média', reputation.average_rating === null ? 'Sem avaliações' : `${Number(reputation.average_rating).toLocaleString('pt-BR')} / 5`],
         ['Trabalhos concluídos', reputation.completed], ['Recontratações', reputation.rehires],
-        ['Check-ins', reputation.checkins], ['Checkouts', reputation.checkouts], ['Antecipações', reputation.early],
+        ['Presença (check-ins)', reputation.checkins], ['Checkouts', reputation.checkouts], ['Antecipações', reputation.early],
         ['Pontuais', reputation.on_time], ['Atrasos', reputation.late], ['Ausências', reputation.absences],
         ['Cancelamentos em 90 dias', reputation.cancellations_90d], ['Abandonos em 180 dias', reputation.abandonments_180d],
       ] as const).map(([label, value]) => <div key={label}><dt className="text-xs text-gray-500">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>)}

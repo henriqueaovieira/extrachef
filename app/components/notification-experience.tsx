@@ -1,5 +1,7 @@
 'use client';
 
+import ProfessionalVerification from '@/app/components/professional-verification';
+
 import { Button, TextInput, Toast } from '@/app/components/ui';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
@@ -381,7 +383,7 @@ export default function NotificationExperience({ children }: { children: ReactNo
               ? <Image src={floatingMessage.imageUrl} alt={`Foto de ${floatingMessage.sender_name}`} width={44} height={44} unoptimized className="size-11 shrink-0 rounded-full object-cover" />
               : <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-full bg-orange-100 font-bold text-orange-800">{floatingMessage.sender_name.trim().charAt(0).toUpperCase()}</span>}
             <div className="min-w-0 flex-1">
-              <p className="truncate font-semibold text-gray-950">{floatingMessage.sender_name}</p>
+              <p className="flex items-center font-semibold text-gray-950"><span className="truncate">{floatingMessage.sender_name}</span><ProfessionalVerification userId={floatingMessage.sender_id} /></p>
               <p className="mt-2 line-clamp-2 text-sm text-gray-700">{floatingMessage.content}</p>
             </div>
             <Button variant="ghost" aria-label="Fechar mensagem" onClick={() => dismiss(floatingMessage.job_id)}>×</Button>

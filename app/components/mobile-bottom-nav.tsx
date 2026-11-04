@@ -19,7 +19,7 @@ const navigationItems: Record<UserRole, Array<{ href: string; label: string; ico
     { href: '/worker/dashboard', label: 'Home', icon: 'home' },
     { href: '/worker/applications', label: 'Minhas Candidaturas', icon: 'applications' },
     { href: '/worker/messages', label: 'Mensagens', icon: 'messages' },
-    { href: '/worker/profile', label: 'Mais', icon: 'more' },
+    { href: '/worker/profile', label: 'Perfil', icon: 'team' },
   ],
 };
 
@@ -61,7 +61,7 @@ export default function MobileBottomNav({ role, activeItem, showOnDesktop = fals
               ? isChatRoute || pathname === itemPath
               : item.label === 'Minhas Candidaturas'
                 ? pathname === itemPath || pathname.startsWith('/worker/invitations')
-                : item.label === 'Mais'
+                : item.label === 'Perfil'
                   ? ['/worker/profile', '/notifications', '/settings'].some((path) => pathname.startsWith(path))
                   : pathname === itemPath;
           const unread = isMessages ? counts.messages : null;

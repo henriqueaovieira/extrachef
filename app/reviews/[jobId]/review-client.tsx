@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { DashboardLogo } from '@/app/components/dashboard-identity';
+import ProfessionalVerification from '@/app/components/professional-verification';
 
 interface ReviewContext {
   job_title: string;
@@ -149,7 +150,7 @@ export default function ReviewClient({ jobId }: { jobId: string }) {
           <article className="space-y-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
             <div>
               <p className="text-xs font-semibold uppercase text-gray-500">{context.job_title}</p>
-              <h2 className="mt-2 text-xl font-bold text-gray-900">{context.reviewed_name}</h2>
+              <h2 className="mt-2 flex items-center text-xl font-bold text-gray-900">{context.reviewed_name}{currentRole === 'restaurant' && <ProfessionalVerification userId={context.reviewed_id} />}</h2>
               <p className="mt-1 text-sm text-gray-500">Como foi sua experiência com {currentRole === 'restaurant' ? 'este profissional' : 'esta empresa'}?</p>
             </div>
 

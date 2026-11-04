@@ -31,6 +31,8 @@ export const eventLabels: Record<string, string> = {
   checkin: 'Check-in realizado', checkout: 'Checkout realizado', review: 'Avaliação concluída',
   early: 'Chegada antecipada', on_time: 'Chegada pontual', late: 'Atraso registrado',
   absent: 'Ausência confirmada', abandoned: 'Abandono registrado', position_reopened: 'Posição reaberta',
+  seek_replacement: 'Restaurante decidiu buscar substituto', close_interrupted: 'Operação encerrada após ocorrência',
+  replacement_invited: 'Convite de substituição enviado', replacement_accepted: 'Reserva disponível · aguardando confirmação do restaurante',
   payment_reported: 'Pagamento informado pela empresa', payment_confirmed: 'Pagamento confirmado pelo profissional',
   payment_disputed: 'Profissional informou não recebimento', work_ended: 'Trabalho encerrado pelo horário',
   absence_pending: 'Ausência aguardando confirmação', commitment_reminder: 'Lembrete de compromisso enviado',

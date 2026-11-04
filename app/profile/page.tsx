@@ -6,13 +6,13 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import LogoutButton from '@/app/components/logout-button';
-import OperationalReputationView from '@/app/components/operational-reputation';
 import { DashboardLogo } from '@/app/components/dashboard-identity';
+import WorkerProfileRedirect from '@/app/components/worker-profile-redirect';
 
 interface UserProfile {
+  id: string;
   name: string;
   city: string | null;
-  score: number | null;
   role: 'restaurant' | 'worker';
 }
 
@@ -37,7 +37,7 @@ export default function ProfilePage() {
 
       const { data, error } = await supabase
         .from('public_user_directory')
-        .select('name, city, score, role')
+        .select('id, name, city, role')
         .eq('id', authData.user.id)
         .single();
 
@@ -54,6 +54,8 @@ export default function ProfilePage() {
   }, [supabase]);
 
   const roleLabel = profile?.role === 'restaurant' ? 'Restaurante' : 'Profissional';
+
+  if (profile?.role === 'worker') return <WorkerProfileRedirect />;
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 pb-28 sm:px-6 sm:py-10 md:pb-10">
@@ -77,7 +79,7 @@ export default function ProfilePage() {
                 {profile.name.trim().charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <h2 className="break-words text-lg font-semibold text-gray-950">{profile.name}</h2>
+                <h2 className="flex items-center text-lg font-semibold text-gray-950"><span className="break-words">{profile.name}</span></h2>
                 <p className="text-sm text-gray-500">{roleLabel}</p>
               </div>
             </div>
@@ -89,7 +91,6 @@ export default function ProfilePage() {
               </div>
             </dl>
 
-            {profile.role === 'worker' && <OperationalReputationView />}
             <LogoutButton />
           </article>
         ) : null}

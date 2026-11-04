@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 import type { DemandPerson } from '@/lib/demand-detail';
+import ProfessionalVerification from '@/app/components/professional-verification';
 
 export default function DemandPersonSummary({ person, role, profileHref }: { person: DemandPerson; role?: string; profileHref?: string }) {
   const [failed, setFailed] = useState(false);
@@ -14,7 +15,7 @@ export default function DemandPersonSummary({ person, role, profileHref }: { per
     <div className="flex min-w-0 items-start gap-3">
       {profileHref ? <Link href={profileHref} aria-label={`Ver perfil de ${person.name}`}>{photo}</Link> : photo}
       <div className="min-w-0">
-        <h3 className="break-words text-sm font-semibold text-gray-950">{person.name}</h3>
+        <h3 className="flex items-center text-sm font-semibold text-gray-950"><span className="min-w-0 break-words">{person.name}</span><ProfessionalVerification userId={person.id} /></h3>
         <p className="mt-0.5 break-words text-xs text-gray-500">{person.specialties?.join(' · ') || role || 'Especialidade não compartilhada'}</p>
         {person.reputation ? <div className="mt-2 space-y-1 text-xs text-gray-600">
           <p className="font-semibold">Confiabilidade {Number(person.reputation.score).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} / 100 · {person.reputation.classification}</p>

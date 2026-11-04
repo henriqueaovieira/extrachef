@@ -26,7 +26,6 @@ interface WorkerProfile {
   experience: string;
   specialties: string;
   profile_photo_path: string;
-  selfie_verification_path: string;
 }
 
 interface RestaurantProfile {
@@ -58,7 +57,6 @@ const emptyWorkerProfile: WorkerProfile = {
   experience: '',
   specialties: '',
   profile_photo_path: '',
-  selfie_verification_path: '',
 };
 
 const emptyRestaurantProfile: RestaurantProfile = {
@@ -90,7 +88,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
   const [workerProfile, setWorkerProfile] = useState<WorkerProfile>(emptyWorkerProfile);
   const [restaurantProfile, setRestaurantProfile] = useState<RestaurantProfile>(emptyRestaurantProfile);
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
-  const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [companyPhotoFiles, setCompanyPhotoFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +130,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       if (role === 'worker') {
         const { data, error } = await supabase
           .from('worker_profiles')
-          .select('cpf, rg, date_of_birth, phone, whatsapp, address, city, state, postal_code, bio, experience, specialties, profile_photo_path, selfie_verification_path')
+          .select('cpf, rg, date_of_birth, phone, whatsapp, address, city, state, postal_code, bio, experience, specialties, profile_photo_path')
           .eq('user_id', userIdValue)
           .maybeSingle();
         if (error) setErrorMessage(error.message);
@@ -210,10 +207,9 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
     setSaving(true);
     try {
       if (role === 'worker') {
-        const [profilePhotoPath, selfiePath] = await Promise.all([
-          profilePhotoFile ? uploadFile(profilePhotoFile, 'worker-private', 'profile-photo') : Promise.resolve(workerProfile.profile_photo_path || null),
-          selfieFile ? uploadFile(selfieFile, 'worker-private', 'selfie') : Promise.resolve(workerProfile.selfie_verification_path || null),
-        ]);
+        const profilePhotoPath = profilePhotoFile
+          ? await uploadFile(profilePhotoFile, 'worker-private', 'profile-photo')
+          : workerProfile.profile_photo_path || null;
 
         // Keep the legacy NOT NULL value; this field is no longer editable by workers.
         const { error } = await supabase.from('worker_profiles').upsert({
@@ -222,7 +218,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
           cpf: normalizeDocument(workerProfile.cpf),
           specialties: workerProfile.specialties.split(',').map((item) => item.trim()).filter(Boolean),
           profile_photo_path: profilePhotoPath,
-          selfie_verification_path: selfiePath,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
         if (error) throw new Error(error.message);
@@ -236,7 +231,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
         setWorkerProfile((current) => ({
           ...current,
           profile_photo_path: profilePhotoPath ?? '',
-          selfie_verification_path: selfiePath ?? '',
         }));
       } else {
         const [logoPath, uploadedPhotos] = await Promise.all([
@@ -268,7 +262,6 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
       }
       setSuccessMessage('Perfil salvo com sucesso.');
       setProfilePhotoFile(null);
-      setSelfieFile(null);
       setLogoFile(null);
       setCompanyPhotoFiles([]);
     } catch (error) {
@@ -331,7 +324,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
             <DashboardLogo role={role} />
             <h1 className="mt-1 text-2xl font-bold text-gray-950">Editar perfil</h1>
           </div>
-          <Link href={role === 'worker' ? '/worker/profile/details' : '/restaurant/profile'} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Cancelar</Link>
+          <Link href={role === 'worker' ? '/worker/profile' : '/restaurant/profile'} className="inline-flex min-h-12 items-center text-sm font-semibold text-gray-600">Cancelar</Link>
         </header>
 
         {errorMessage && <Toast tone="error">{errorMessage}</Toast>}
@@ -368,8 +361,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 <h3 className="font-semibold text-gray-900">Arquivos do perfil</h3>
                 {fileInput('Foto de perfil', 'image/jpeg,image/png,image/webp', setProfilePhotoFile, workerProfile.profile_photo_path, 'user')}
                 <CameraCapture label="foto de perfil" onCapture={setProfilePhotoFile} />
-                {fileInput('Selfie de verificação', 'image/jpeg,image/png,image/webp', setSelfieFile, workerProfile.selfie_verification_path, 'user')}
-                <CameraCapture label="selfie de verificação" onCapture={setSelfieFile} />
+                <Link href="/worker/profile#verification" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-700">Perfil Verificado: solicitar verificação de identidade</Link>
               </div>
             </>
           ) : (

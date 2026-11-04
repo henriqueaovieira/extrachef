@@ -11,7 +11,7 @@ import { getDeviceCoordinates, type DeviceCoordinates } from '@/lib/geolocation'
 import { distanceMeters, estimatedDistance } from '@/lib/work-location';
 import { loadPendingReviews, type PendingReview } from '@/lib/operations';
 import OperationalReputationView from '@/app/components/operational-reputation';
-import { demandWindow } from '@/lib/demands';
+import { canRecruitJob, demandWindow } from '@/lib/demands';
 
 interface Job {
   id: string;
@@ -22,6 +22,8 @@ interface Job {
   end_time: string;
   value: number;
   status: string;
+  created_at?: string;
+  demand_archived_at?: string | null;
   work_address: string | null;
   work_number: string | null;
   work_city: string | null;
@@ -77,11 +79,22 @@ export default function WorkerDashboardPage() {
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [reviewsError, setReviewsError] = useState('');
   const [reviewsReady, setReviewsReady] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const refresh = () => setNow(new Date());
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
+    let refreshing = false;
 
     async function loadDashboardData() {
+      if (refreshing) return;
+      refreshing = true;
       try {
         const { data: authData, error: authError } = await supabase.auth.getUser();
         if (authError || !authData.user) {
@@ -108,8 +121,9 @@ export default function WorkerDashboardPage() {
           supabase.from('applications').select('job_id').eq('worker_id', userId),
           supabase
             .from('jobs')
-            .select('id, title, description, job_date, start_time, end_time, value, status, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
+            .select('id, title, description, job_date, start_time, end_time, value, status, created_at, demand_archived_at, work_address, work_number, work_city, work_state, work_latitude, work_longitude, location_name, restaurant:users!restaurant_id(name)')
             .eq('status', 'open')
+            .eq('recruitment_available', true)
             .order('job_date', { ascending: true }),
           supabase.rpc('get_worker_dashboard_stats'),
           supabase.rpc('get_worker_estimated_earnings'),
@@ -138,9 +152,10 @@ export default function WorkerDashboardPage() {
           console.error('Worker applications lookup failed.', applicationsResult.error);
           setApplicationsError('Não foi possível verificar suas candidaturas.');
         } else if (applicationsResult.data) {
+          setApplicationsError('');
           setAppliedJobIds(applicationsResult.data.map((application) => application.job_id));
         }
-        if (jobsResult.data) setJobs(jobsResult.data as unknown as Job[]);
+        if (jobsResult.data) { setJobs(jobsResult.data as unknown as Job[]); setJobsError(''); }
         if (jobsResult.error) {
           console.error('Worker job listings lookup failed.', jobsResult.error);
           setJobsError('Não foi possível carregar as vagas.');
@@ -167,12 +182,17 @@ export default function WorkerDashboardPage() {
           setPageError('Não foi possível carregar o painel profissional.');
           setLoading(false);
         }
-      }
+      } finally { refreshing = false; }
     }
 
     void loadDashboardData();
+    const refresh = () => { void loadDashboardData(); };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
     return () => {
       isMounted = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
     };
   }, [supabase]);
 
@@ -186,6 +206,12 @@ export default function WorkerDashboardPage() {
 
   const handleApply = async (jobId: string) => {
     if (applyingId) return;
+    const job = jobs.find((item) => item.id === jobId);
+    if (!job || !canRecruitJob(job, new Date())) {
+      setNow(new Date());
+      setFeedbackMessage('O recrutamento desta operação foi encerrado.');
+      return;
+    }
     if (!reviewsReady || pendingReviews.length) {
       setFeedbackMessage(pendingReviews.length ? 'Antes de se candidatar novamente, avalie sua última experiência.' : 'Não foi possível conferir suas avaliações pendentes. Atualize a página.');
       return;
@@ -358,13 +384,13 @@ export default function WorkerDashboardPage() {
             <Toast tone="info">{feedbackMessage}</Toast>
           )}
 
-          {jobsError ? <Toast tone="error">{jobsError}</Toast> : jobs.length === 0 ? (
+          {jobsError ? <Toast tone="error">{jobsError}</Toast> : jobs.filter((job) => canRecruitJob(job, now) && !appliedJobIds.includes(job.id)).length === 0 ? (
             <EmptyState icon="◇" title="Novas oportunidades vêm por aí"
               description="Não há plantões abertos agora. Enquanto isso, deixe seu perfil pronto para a próxima oportunidade."
-              action={<Link href="/worker/profile/edit" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Revisar meu perfil</Link>} />
+              action={<Link href="/worker/profile?edit=1" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Revisar meu perfil</Link>} />
           ) : (
             <div className="grid gap-4">
-              {jobs.map((job) => {
+              {jobs.filter((job) => canRecruitJob(job, now) && !appliedJobIds.includes(job.id)).map((job) => {
                 const hasApplied = appliedJobIds.includes(job.id);
                 const isProcessing = applyingId === job.id;
 

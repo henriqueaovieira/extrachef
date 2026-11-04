@@ -24,7 +24,7 @@ export function DashboardAvatar({
 }) {
   return (
     <Link
-      href={role === 'worker' ? '/worker/profile/details' : '/restaurant/profile'}
+      href={role === 'worker' ? '/worker/profile' : '/restaurant/profile'}
       aria-label="Meu perfil"
       className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-orange-50 text-sm font-semibold text-orange-900 ring-1 ring-black/5"
     >

@@ -100,7 +100,7 @@ test('event inheritance creates an editable snapshot, including legacy events', 
   }), geo.emptyWorkLocation);
 });
 
-test('save geocodes automatically, reuses confirmed coordinates and surfaces failures', async (t) => {
+test('save geocodes automatically, reuses coordinates and falls back to the address on geocoding failures', async (t) => {
   const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url, '/api/geocode');
     assert.equal(JSON.parse(options.body).city, 'Piracicaba');
@@ -110,12 +110,17 @@ test('save geocodes automatically, reuses confirmed coordinates and surfaces fai
   assert.equal(resolved.latitude, -22);
   await geo.resolveWorkLocation(resolved);
   assert.equal(fetch.mock.callCount(), 1);
-  fetch.mock.mockImplementation(async () => Response.json({ error: 'Local não encontrado' }, { status: 422 }));
-  await assert.rejects(geo.resolveWorkLocation(address()), /Local não encontrado/);
+  fetch.mock.mockImplementation(async () => Response.json({
+    error: 'Geocodificação não configurada. Solicite a configuração do serviço ao administrador.',
+  }, { status: 503 }));
+  const unresolved = await geo.resolveWorkLocation(address());
+  assert.equal(unresolved.address, 'Rua das Flores');
+  assert.equal(unresolved.latitude, null);
+  assert.equal(unresolved.longitude, null);
   fetch.mock.mockImplementation(async () => Response.json({ latitude: 100, longitude: -47 }));
-  await assert.rejects(geo.resolveWorkLocation(address()), /coordenadas válidas/);
+  assert.equal((await geo.resolveWorkLocation(address())).latitude, null);
   fetch.mock.mockImplementation(async () => { throw new Error('Sem conexão'); });
-  await assert.rejects(geo.resolveWorkLocation(address()), /Sem conexão/);
+  assert.equal((await geo.resolveWorkLocation(address())).address, 'Rua das Flores');
 });
 
 function route({ user = { id: 'restaurant' }, authError = null, role = 'restaurant', roleError = null } = {}) {
@@ -205,6 +210,6 @@ test('job creation no longer captures publisher GPS and worker applications have
   const application = worker.slice(worker.indexOf('const handleApply'), worker.indexOf('const shareJob'));
   assert.match(application, /from\('applications'\)\.insert/);
   assert.doesNotMatch(application, /workerLocation|getDeviceCoordinates|distanceMeters/);
-  const fields = source('../app/components/work-location-fields.tsx');
-  assert.match(fields, /latitude: null, longitude: null/);
+  assert.match(create, /validCoordinates\(location\.latitude, location\.longitude\)/);
+  assert.match(create, /p_work_location_id: savedLocation\.id/);
 });

@@ -265,6 +265,7 @@ function mountProvider(db) {
     },
   };
   const { default: Provider } = loadTs('../app/components/notification-experience.tsx', {
+    '@/app/components/professional-verification': { default: () => null },
     react,
     'next/navigation': { usePathname: () => pathname },
     'next/image': { default: 'image' },
@@ -502,7 +503,7 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
   const workerMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'worker' }));
   assert.match(workerMarkup, /aria-label="Mensagens: 3 não lidas"/);
   assert.doesNotMatch(workerMarkup, /Avisos/);
-  for (const label of ['Home', 'Minhas Candidaturas', 'Mensagens', 'Mais']) assert.match(workerMarkup, new RegExp(`>${label}<`));
+  for (const label of ['Home', 'Minhas Candidaturas', 'Mensagens', 'Perfil']) assert.match(workerMarkup, new RegExp(`>${label}<`));
   assert.equal((workerMarkup.match(/href=/g) ?? []).length, 4);
   assert.equal((workerMarkup.match(/aria-current="page"/g) ?? []).length, 1);
   assert.doesNotMatch(workerMarkup, /125|99\+/);
@@ -518,7 +519,11 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
     ['/worker/applications', 'Minhas Candidaturas'],
     ['/worker/messages', 'Mensagens'],
     ['/chat/job-1', 'Mensagens'],
-    ['/worker/profile', 'Mais'],
+    ['/worker/profile', 'Perfil'],
+    ['/worker/profile/details', 'Perfil'],
+    ['/worker/profile/edit', 'Perfil'],
+    ['/settings/privacy', 'Perfil'],
+    ['/notifications', 'Perfil'],
   ]) {
     pathname = path;
     const markup = renderToStaticMarkup(React.createElement(Nav, { role: 'worker' }));

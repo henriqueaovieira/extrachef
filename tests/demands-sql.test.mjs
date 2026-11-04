@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 const source = (name) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8');
 const id = (value) => `00000000-0000-0000-0000-${String(value).padStart(12, '0')}`;
 
-test('operational demands persist 1–50 slots atomically and protect ownership, reservations and existing attendance contracts', async (t) => {
+test('new operation calls create one vacancy while preserving historical demand management and attendance contracts', async (t) => {
   const db = new PGlite();
   t.after(() => db.close());
   await db.exec(`
@@ -46,6 +46,12 @@ test('operational demands persist 1–50 slots atomically and protect ownership,
     CREATE TABLE public.work_locations(id uuid, restaurant_id uuid, archived_at timestamptz, revision integer,
       name text,address text,number text,neighborhood text,city text,state text,postal_code text,country_code text,
       latitude double precision,longitude double precision,geocoding_status text,address_version integer);
+    CREATE TABLE public.restaurant_profiles(
+      user_id uuid PRIMARY KEY,address text,city text,state text,postal_code text);
+    CREATE FUNCTION public.save_work_location(text,text,text,text,text,text,text,uuid,integer)
+      RETURNS public.work_locations LANGUAGE sql AS $$ SELECT NULL::public.work_locations $$;
+    CREATE FUNCTION public.manage_work_location(uuid,text,integer)
+      RETURNS void LANGUAGE sql AS $$ SELECT $$;
     CREATE TABLE public.events(id uuid, restaurant_id uuid,revision integer,work_location_id uuid,
       location_name text,event_address text,event_number text,event_neighborhood text,event_city text,event_state text,
       event_postal_code text,event_country_code text,event_latitude double precision,event_longitude double precision,
@@ -67,7 +73,13 @@ test('operational demands persist 1–50 slots atomically and protect ownership,
   await db.exec(source('20261017010000_operational_demands.sql'));
   const query = async (sql, args = []) => (await db.query(sql, args)).rows;
   const login = async (value) => db.exec(`RESET ROLE; SET request.jwt.claim.sub='${value ? id(value) : ''}'; SET ROLE authenticated;`);
-  const create = async (quantity = 1) => (await query("SELECT public.create_restaurant_demand('Garçom','Reforço','2099-01-01','18:00','23:00',100,$1) AS id", [quantity]))[0].id;
+  await login(1);
+  const legacyTeam = (await query(
+    "SELECT public.create_restaurant_demand('Equipe antiga','Demanda histórica','2099-01-01','18:00','23:00',100,2) AS id",
+  ))[0].id;
+  await db.exec('RESET ROLE');
+  await db.exec(source('20261104080000_single_vacancy_operations.sql'));
+  const create = async () => (await query("SELECT public.create_restaurant_demand('Garçom','Reforço','2099-01-01','18:00','23:00',100) AS id"))[0].id;
   const jobs = (demand) => query('SELECT * FROM public.jobs WHERE demand_id=$1 ORDER BY id', [demand]);
   const manage = async (demand, action, date = '2099-02-01') => (await query(
     "SELECT public.manage_restaurant_demand($1,$2,'Novo nome','Descrição',$3,'10:00','20:00',150,1) AS id", [demand, action, date],
@@ -79,25 +91,18 @@ test('operational demands persist 1–50 slots atomically and protect ownership,
   };
   await login(1);
   assert.equal((await query('SELECT demand_id FROM public.jobs WHERE id=$1', [id(10)]))[0].demand_id, id(10));
-  for (const quantity of [1, 2, 20, 50]) {
-    const demand = await create(quantity);
-    assert.equal((await jobs(demand)).length, quantity);
-    assert.equal(new Set((await jobs(demand)).map((job) => job.demand_id)).size, 1);
+  assert.equal(await query(`SELECT to_regprocedure(
+    'public.create_restaurant_demand(text,text,date,time without time zone,time without time zone,numeric,integer,text,uuid,integer,uuid,integer)'
+  ) AS signature`).then((rows) => rows[0].signature), null);
+  const [createDefinition] = await query(`SELECT pg_get_functiondef(
+    'public.create_restaurant_demand(text,text,date,time without time zone,time without time zone,numeric,text,uuid,integer,uuid,integer)'::regprocedure
+  ) AS definition`);
+  assert.match(createDefinition.definition, /create_restaurant_job/);
+  assert.doesNotMatch(createDefinition.definition, /p_quantity|1 a 50 profissionais/i);
+  for (let i = 0; i < 4; i += 1) {
+    const demand = await create();
+    assert.equal((await jobs(demand)).length, 1);
   }
-  for (const quantity of [0, -1, 51, null]) await assert.rejects(create(quantity), /1 a 50/);
-  await db.exec(`RESET ROLE;
-    CREATE FUNCTION public.fail_second_slot() RETURNS trigger LANGUAGE plpgsql AS $fn$
-    BEGIN
-      IF NEW.title='Falhar' AND EXISTS(SELECT 1 FROM public.jobs WHERE title='Falhar') THEN
-        RAISE EXCEPTION 'Falha na segunda posição';
-      END IF;
-      RETURN NEW;
-    END; $fn$;
-    CREATE TRIGGER fail_second_slot BEFORE INSERT ON public.jobs FOR EACH ROW EXECUTE FUNCTION public.fail_second_slot();
-    SET ROLE authenticated;`);
-  await assert.rejects(query("SELECT public.create_restaurant_demand('Falhar','Teste','2099-01-01','18:00','23:00',100,2)"), /segunda posição/);
-  assert.equal((await query("SELECT count(*) AS total FROM public.jobs WHERE title='Falhar'"))[0].total, 0);
-  await db.exec('RESET ROLE; DROP TRIGGER fail_second_slot ON public.jobs; DROP FUNCTION public.fail_second_slot(); SET ROLE authenticated;');
   const single = await create();
   const edited = await manage(single, 'edit');
   assert.equal((await jobs(edited))[0].title, 'Novo nome');
@@ -114,7 +119,7 @@ test('operational demands persist 1–50 slots atomically and protect ownership,
   await login(null);
   await assert.rejects(create(), /restaurante/);
   await login(1);
-  const team = await create(2);
+  const team = legacyTeam;
   const slots = await jobs(team);
   await apply(slots[0].id, 3);
   await apply(slots[1].id, 3);

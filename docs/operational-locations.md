@@ -47,7 +47,7 @@ GPS do navegador pode ser impreciso ou falsificado; uma cerca geográfica não
 certifica presença física. As observações originais de checkins/checkouts são
 preservadas. Não ampliamos o raio automaticamente pela precisão do dispositivo.
 
-## Geocodificação: configuração obrigatória
+## Geocodificação: configuração opcional
 
 Configure somente no servidor, usando o serviço próprio/contratado escolhido:
 
@@ -90,9 +90,12 @@ da rota não constitui limitação de consumo.
 Não há mapa, pin arrastável ou integração com fornecedor público implícita.
 Somente as coordenadas são mostradas para conferência.
 
-**Sem endpoint configurado, novos locais sem coordenadas herdadas não podem ser
-salvos.** Não basta aplicar a migration: configure e valide o serviço antes
-de liberar criação de vagas/eventos. Não foi efetuada chamada a provedor real.
+Sem endpoint, ou quando o serviço falhar, a criação da operação continua com o
+endereço informado e coordenadas pendentes. Não são inventadas coordenadas:
+recursos que dependam de distância, proximidade ou validação geográfica não
+estarão disponíveis para essa operação até que suas coordenadas sejam
+resolvidas. A criação e o salvamento do endereço não dependem da configuração
+do serviço.
 
 ## Migration e dependências
 

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Button, Toast } from '@/app/components/ui';
 import { createClient } from '@/lib/supabase/client';
-import { demandDate, demandWindow, type Demand } from '@/lib/demands';
+import { canHireDemand, canRecruitDemand, demandDate, demandWindow, type Demand } from '@/lib/demands';
 import { shareDemand } from '@/lib/demand-detail';
 
 const healthStyles = {
@@ -108,7 +108,7 @@ export default function DemandCard({ demand, onChanged }: { demand: Demand; onCh
       <DemandSituation demand={demand} />
       <div className="relative z-10 mt-auto flex flex-wrap items-center justify-between gap-2">
         <Link href={`/restaurant/demands/${demand.id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-gray-900">Ver Detalhes da Operação <span aria-hidden="true" className="ml-2">→</span></Link>
-        {demand.active && <Link href={`/restaurant/demands/${demand.id}#team-heading`} className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">{demand.candidates ? 'Analisar candidatos' : demand.hired < demand.required ? 'Preencher equipe' : 'Ver equipe'}</Link>}
+        {demand.active && <Link href={`/restaurant/demands/${demand.id}#people-heading`} className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">{demand.candidates && canHireDemand(demand) ? 'Analisar candidatos' : canRecruitDemand(demand) ? 'Preencher equipe' : 'Ver pessoas da operação'}</Link>}
       </div>
       <details className="relative z-10 border-t border-gray-100 pt-1">
         <summary className="min-h-11 cursor-pointer content-center text-xs font-semibold text-gray-500">Mais ações</summary>
