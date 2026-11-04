@@ -37,46 +37,104 @@ const feature = (overrides = {}, coordinates = [-46.63, -23.55]) => ({
   },
 });
 const collection = (...features) => ({ type: 'FeatureCollection', features });
+const quiet = t => Object.fromEntries(['info', 'warn', 'error'].map(level =>
+  [level, t.mock.method(console, level, () => {})]));
 
-test('Photon forward and reverse use configured base URL, GeoJSON order and server-only namespace', async t => {
+test('Photon forward and reverse use configured base URL, lang=default, GeoJSON order and server-only namespace', async t => {
+  const logs = quiet(t);
   const provider = new PhotonProvider('https://geo.example/base', 1000);
   const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(url.origin, 'https://geo.example');
     assert.equal(options.cache, 'no-store');
     assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Accept, 'application/json');
     return Response.json(collection(feature()));
   });
   const result = await provider.geocode(address);
   assert.equal(result.latitude, -23.55);
   assert.equal(result.longitude, -46.63);
   assert.equal(result.address.state, 'SP');
-  assert.match(fetch.mock.calls[0].arguments[0].pathname, /base\/api$/);
-  assert.match(fetch.mock.calls[0].arguments[0].searchParams.get('q'), /120.*São Paulo/);
+  assert.equal('country' in result, false);
+  const forward = fetch.mock.calls[0].arguments[0];
+  assert.equal(forward.pathname, '/base/api');
+  assert.equal(forward.searchParams.get('lang'), 'default');
+  assert.equal(forward.searchParams.get('limit'), '5');
+  assert.match(forward.searchParams.get('q'), /120.*São Paulo/);
   await provider.reverseGeocode({ latitude: -23.55, longitude: -46.63 });
   const reverse = fetch.mock.calls[1].arguments[0];
   assert.equal(reverse.pathname, '/base/reverse');
   assert.equal(reverse.searchParams.get('lat'), '-23.55');
+  assert.equal(reverse.searchParams.get('lang'), 'default');
+  await new PhotonProvider('https://geo.example/base/', 1000).geocode(address);
+  assert.equal(fetch.mock.calls[2].arguments[0].pathname, '/base/api');
+  await new PhotonProvider('https://geo.example', 1000).geocode(address);
+  assert.equal(fetch.mock.calls[3].arguments[0].pathname, '/api');
   assert.notEqual(provider.namespace, new PhotonProvider('https://other.example', 1000).namespace);
+  const events = logs.info.mock.calls.map(call => call.arguments[1].event);
+  assert.ok(events.includes('provider_request') && events.includes('provider_response'));
+  const request = logs.info.mock.calls[0].arguments[1];
+  assert.equal(request.provider, 'photon');
+  assert.match(request.url, /^https:\/\/geo\.example\/base\/api\?q=/);
+});
+
+test('Photon street matching tolerates accents, abbreviations and missing house numbers', async t => {
+  quiet(t);
+  const provider = new PhotonProvider('https://geo.example', 1000);
+  const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(collection(feature())));
+  for (const input of [
+    { address: 'R. das Flores' }, { address: 'RUA DAS FLÔRES' }, { address: 'Rua Flores' },
+    { city: 'Sao Paulo' }, { address: 'R Das  Flores', number: ' 120 ' },
+  ]) {
+    assert.equal((await provider.geocode({ ...address, ...input })).latitude, -23.55);
+  }
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ street: 'Avenida Doutor Arnaldo', housenumber: '' }))));
+  assert.equal((await provider.geocode({ ...address, address: 'Av. Dr. Arnaldo' })).latitude, -23.55);
+
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ street: undefined, housenumber: undefined, type: 'street', name: 'Rua das Flores' }))));
+  const street = await provider.geocode(address);
+  assert.equal(street.address.address, 'Rua das Flores');
+  assert.equal(street.address.number, '');
+
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ housenumber: '' }, [-46.70, -23.60]), feature({}, [-46.63, -23.55]))));
+  assert.equal((await provider.geocode(address)).latitude, -23.55, 'exact house number wins over street fallback');
+
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ housenumber: '' }), feature({ housenumber: '' }, [-46.6305, -23.5505]))));
+  assert.equal((await provider.geocode(address)).latitude, -23.55, 'nearby street segments are accepted');
+
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ postcode: '' }))));
+  assert.equal((await provider.geocode({ ...address, postal_code: '01001-000' })).latitude, -23.55);
 });
 
 test('Photon rejects imprecise, wrong country/state/city, mismatched and ambiguous addresses', async t => {
+  quiet(t);
   const provider = new PhotonProvider('https://geo.example', 1000);
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(collection()));
   for (const properties of [
     {}, { countrycode: 'US' }, { state: 'Rio de Janeiro' }, { city: 'Campinas' },
-    { street: '' }, { housenumber: '' }, { housenumber: '121' },
+    { street: '' }, { street: 'Rua das Rosas' }, { housenumber: '121' },
+    { street: undefined, type: 'house', name: 'Rua das Flores' }, { postcode: '02002-000' },
   ]) {
     fetch.mock.mockImplementation(async () => Response.json(collection(
       ...(Object.keys(properties).length ? [feature(properties)] : []))));
-    await assert.rejects(provider.geocode(address), error => error.code === 'not_found');
+    await assert.rejects(provider.geocode({ ...address, postal_code: '01001-000' }), error => error.code === 'not_found',
+      JSON.stringify(properties));
   }
   fetch.mock.mockImplementation(async () => Response.json(collection(feature(), feature({}, [-46.64, -23.55]))));
+  await assert.rejects(provider.geocode(address), error => error.code === 'ambiguous');
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ housenumber: '' }), feature({ housenumber: '' }, [-46.70, -23.60]))));
   await assert.rejects(provider.geocode(address), error => error.code === 'ambiguous');
   await assert.rejects(provider.geocode({ ...address, number: '' }), error => error.code === 'invalid_address');
   await assert.rejects(provider.reverseGeocode({ latitude: null, longitude: 0 }), error => error.code === 'invalid_coordinates');
 });
 
 test('Photon classifies timeout, offline, 429, 5xx, invalid JSON/shape and coordinates', async t => {
+  const logs = quiet(t);
   const provider = new PhotonProvider('https://geo.example', 1000);
   const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(collection(feature())));
   for (const [implementation, code] of [
@@ -101,6 +159,30 @@ test('Photon classifies timeout, offline, 429, 5xx, invalid JSON/shape and coord
   }));
   await assert.rejects(provider.geocode(address), error =>
     error.code === 'rate_limited' && error.retryAfter >= 118 && error.retryAfter <= 120);
+
+  const photon400 = '{"lang":[{"message":"Language is not supported. Supported are: default, de, en, fr","args":{},"value":"pt"}]}';
+  for (const [status, body] of [[400, photon400], [502, 'Bad gateway']]) {
+    logs.error.mock.resetCalls();
+    fetch.mock.mockImplementation(async () => new Response(body, { status }));
+    await assert.rejects(provider.geocode(address), error =>
+      error.code === 'provider_error' && error.providerStatus === status && error.status === 503
+      && !error.message.includes(body));
+    const logged = logs.error.mock.calls.find(call => call.arguments[1].event === 'provider_http_error').arguments[1];
+    assert.equal(logged.status, status);
+    assert.equal(logged.body, body);
+    assert.equal(logged.bodyTruncated, false);
+    assert.match(logged.url, /^https:\/\/geo\.example\/api\?/);
+  }
+  logs.error.mock.resetCalls();
+  fetch.mock.mockImplementation(async () => new Response('x'.repeat(10_050), { status: 500 }));
+  await assert.rejects(provider.geocode(address), error => error.code === 'provider_error');
+  const truncated = logs.error.mock.calls[0].arguments[1];
+  assert.equal(truncated.body.length, 10_000);
+  assert.equal(truncated.bodyTruncated, true);
+  fetch.mock.mockImplementation(async () => { throw new DOMException('timeout', 'TimeoutError'); });
+  logs.error.mock.resetCalls();
+  await assert.rejects(provider.geocode(address));
+  assert.equal(logs.error.mock.calls[0].arguments[1].event, 'provider_timeout');
 });
 
 function dbMock() {
