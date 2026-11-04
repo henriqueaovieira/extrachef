@@ -181,7 +181,7 @@ test('creation and details wire persistent RPCs and never mutate job columns dir
   assert.match(create, /rpc\('create_restaurant_demand'/);
   assert.doesNotMatch(create, /p_quantity/);
   assert.match(create, /p_location_source: 'catalog'/);
-  assert.match(create, /p_work_location_id: savedLocation\.id/);
+  assert.match(create, /p_work_location_id: selectedLocation\.id/);
   const card = source('../app/components/demand-card.tsx');
   assert.match(card, /p_action: 'cancel'/);
   assert.match(source('../lib/demand-detail.ts'), /navigator\.share/);

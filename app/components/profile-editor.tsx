@@ -378,6 +378,7 @@ export default function ProfileEditor({ role }: { role: ProfileRole }) {
                 {input('Estado', restaurantProfile.state, (value) => updateRestaurant('state', value), { autoComplete: 'address-level1', maxLength: 2 })}
               </div>
               {input('Endereço', restaurantProfile.address, (value) => updateRestaurant('address', value), { autoComplete: 'street-address' })}
+              <Link href="/restaurant/locations" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-700">Endereço operacional principal: usado nas operações e no check-in por GPS</Link>
               <label className="block space-y-1.5"><span className="text-sm font-medium text-gray-700">Descrição</span><TextArea value={restaurantProfile.description} onChange={(event) => updateRestaurant('description', event.target.value)} rows={4} maxLength={2000}  /></label>
 
               <div className="space-y-3 border-t border-gray-100 pt-5">

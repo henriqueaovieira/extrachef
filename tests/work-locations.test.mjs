@@ -4,23 +4,29 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 
 const source = (file) => readFileSync(new URL(file, import.meta.url), 'utf8');
 
-test('manual location management page and component are removed', () => {
-  for (const file of [
-    '../app/restaurant/locations/page.tsx',
-    '../app/components/restaurant-locations.tsx',
-  ]) {
-    assert.equal(existsSync(new URL(file, import.meta.url)), false, file);
-  }
+test('operational location management page reuses the work_locations catalog', () => {
+  assert.equal(existsSync(new URL('../app/components/restaurant-locations.tsx', import.meta.url)), false);
+  const page = source('../app/restaurant/locations/page.tsx');
+  assert.match(page, /Locais operacionais/);
+  assert.match(page, /loadWorkLocations/);
+  assert.match(page, /manageLocation\(supabase, location, '(set_default|archive|restore)'\)/);
+  assert.match(page, /confirmLocation\(supabase, location, 'device'\)/);
+  assert.doesNotMatch(page, /restaurant_locations/);
+  assert.match(source('../app/components/more-navigation.tsx'), /href: '\/restaurant\/locations', label: 'Locais operacionais'/);
+  assert.match(source('../app/components/profile-editor.tsx'), /href="\/restaurant\/locations"/);
 });
 
-test('application has no links, labels or imports for manual location management', () => {
+test('application never introduces a separate restaurant_locations entity or legacy labels', () => {
   for (const directory of ['../app/', '../lib/']) {
     const root = new URL(directory, import.meta.url);
     for (const file of readdirSync(root, { recursive: true })) {
       if (!/\.(ts|tsx)$/.test(file)) continue;
       const content = readFileSync(new URL(file.replaceAll('\\', '/'), root), 'utf8');
-      assert.doesNotMatch(content, /\/restaurant\/locations\b|Meus locais|restaurant-locations/i, file);
+      assert.doesNotMatch(content, /restaurant_locations|Meus locais|restaurant-locations/i, file);
     }
+  }
+  for (const file of readdirSync(new URL('../supabase/migrations/', import.meta.url))) {
+    assert.doesNotMatch(source(`../supabase/migrations/${file}`), /CREATE TABLE (public\.)?restaurant_locations/i, file);
   }
   assert.match(source('../app/components/mobile-bottom-nav.tsx'), /href: '\/restaurant\/more'/);
 });

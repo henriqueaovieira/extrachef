@@ -20,9 +20,9 @@ test('product has no Agenda route or event dependency in operation publication',
   }
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.doesNotMatch(create, /from\('events'\)|p_event_id|p_event_revision|selectedEvent|eventsLoading|URLSearchParams|job-event/);
-  assert.match(create, /rpc\('save_geocoded_work_location'/);
+  assert.doesNotMatch(create, /save_geocoded_work_location|resolveWorkLocation/);
   assert.match(create, /p_location_source: 'catalog'/);
-  assert.match(create, /p_work_location_id: savedLocation\.id/);
+  assert.match(create, /p_work_location_id: selectedLocation\.id/);
   assert.doesNotMatch(create, /endereço principal do restaurante|p_event_id|job-event/);
 });
 

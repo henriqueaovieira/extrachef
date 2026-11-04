@@ -158,12 +158,17 @@ export class PhotonProvider implements GeocodingProvider {
     const street = comparableStreet(address.address);
     const number = comparableNumber(address.number);
     const postalCode = address.postal_code.replace(/\D/g, '');
+    // OSM often stores the city-wide CEP (e.g. 13520-000); then only the 5-digit region must agree.
+    const postalMatches = (value: string) => {
+      const returned = value.replace(/\D/g, '');
+      if (!postalCode || returned.length !== 8) return true;
+      return returned.endsWith('000') ? returned.slice(0, 5) === postalCode.slice(0, 5) : returned === postalCode;
+    };
     const candidates = results.filter(result =>
       comparable(result.address.city) === comparable(address.city)
       && result.address.state === address.state
       && street !== '' && comparableStreet(result.address.address) === street
-      && (!postalCode || !result.address.postal_code
-        || result.address.postal_code.replace(/\D/g, '') === postalCode));
+      && postalMatches(result.address.postal_code));
     // A returned house number must match; results without one are street-level fallbacks.
     const houses = candidates.filter(result => comparableNumber(result.address.number) === number);
     const streets = candidates.filter(result => !result.address.number);

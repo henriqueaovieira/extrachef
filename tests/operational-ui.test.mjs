@@ -25,6 +25,16 @@ const OperationFlow = load('../app/components/operation-flow.tsx', {
   '@/lib/operations': operations,
   'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
 }).default;
+const workLocations = load('../lib/work-locations.ts');
+const LocationFormStub = () => React.createElement('div', { 'data-testid': 'location-form' });
+const primaryLocation = (overrides = {}) => ({
+  id: 'primary', restaurant_id: 'company', name: 'Matriz', address: 'Rua das Flores', number: '120',
+  neighborhood: 'Centro', city: 'São Paulo', state: 'SP', postal_code: '01001000', country_code: 'BR',
+  latitude: -23.5, longitude: -46.6, geocoding_status: 'resolved', geocoding_precision: 'house',
+  geocoding_error_code: null, candidate_latitude: null, candidate_longitude: null, kind: 'permanent',
+  valid_until: null, confirmed_at: '2026-01-01T00:00:00Z', address_version: 1, revision: 3, is_default: true,
+  archived_at: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', ...overrides,
+});
 const context = (overrides = {}) => ({
   job_id: 'job', demand_id: 'demand', title: 'Garçom', location: 'Salão',
   starts_at: '2026-10-17T18:00:00-03:00', ends_at: '2026-10-17T23:00:00-03:00',
@@ -45,7 +55,8 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
   const state = [], effects = [];
   let cursor, effectCursor, tree, dirty = true;
   const db = {
-    value: initial, failure: null, rpcError: null, geocodingError: null, calls: [], queries: [], pendingReviews: [], navigation: [], geocoded: [],
+    value: initial, failure: null, rpcError: null, calls: [], queries: [], pendingReviews: [], navigation: [], locationLoads: [],
+    locations: [primaryLocation()], locationsError: null,
     gpsCalls: 0, gpsError: null, coordinates: { latitude: -23.5, longitude: -46.6, accuracy: 10 },
     auth: { getUser: async () => ({ data: { user: { id: 'company' } }, error: null }) },
     from: (table) => {
@@ -56,12 +67,6 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
       db.calls.push({ name, args });
       if (name === 'pending_operational_reviews') return { data: db.pendingReviews, error: null };
       if (db.rpcError) return { data: null, error: db.rpcError };
-      if (name === 'save_geocoded_work_location') return { data: {
-        id: 'operation-location', revision: 1, geocoding_status: 'resolved', latitude: -23.5, longitude: -46.6,
-      }, error: null };
-      if (name === 'save_work_location') return { data: {
-        id: 'operation-location', revision: 1, geocoding_status: 'pending', latitude: null, longitude: null,
-      }, error: null };
       if (name === 'create_restaurant_demand') return { data: 'published-demand', error: null };
       return name === 'operational_context' ? { data: db.value, error: null }
         : db.failure ? { data: db.failure, error: null } : { data: db.value, error: null };
@@ -99,16 +104,18 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
         return db.coordinates;
       },
     },
-    '@/lib/work-location': {
-      emptyWorkLocation: { location_name: '', address: '', number: '', neighborhood: '', city: '', state: '', postal_code: '', latitude: null, longitude: null },
-      validCoordinates: (latitude, longitude) => Number.isFinite(latitude) && Math.abs(latitude) <= 90
-        && Number.isFinite(longitude) && Math.abs(longitude) <= 180,
-      resolveWorkLocation: async location => {
-        db.geocoded.push(location);
-        if (db.geocodingError) throw new Error(db.geocodingError);
-        return { ...location, latitude: -23.5, longitude: -46.6 };
+    '@/lib/work-locations': workLocations,
+    '@/lib/locations/client': {
+      loadWorkLocations: async (client, owner) => {
+        db.locationLoads.push(owner);
+        if (db.locationsError) throw new Error(db.locationsError);
+        return db.locations;
       },
+      manageLocation: async (client, location, action) => { db.calls.push({ name: 'manage_work_location', args: { id: location.id, action } }); },
+      confirmLocation: async (client, location, method) => { db.calls.push({ name: 'confirm_work_location', args: { id: location.id, method } }); },
+      retryLocation: async id => { db.calls.push({ name: 'retry_location', args: { id } }); return { location: primaryLocation({ id }) }; },
     },
+    '@/app/components/location-form': { default: LocationFormStub },
     '@/lib/specialties': { commonSpecialties: ['Garçom', 'Eventos', 'Bar', 'Buffet', 'Atendimento', 'Cozinha', 'Auxiliar', 'Bartender'] },
   }).default;
   function elements(node) {
@@ -371,8 +378,7 @@ test('urgent publication warns about its reduced window, but publication at star
       await app.flush();
       const fields = {
         'operation-role':'Garçom','operation-date':'2026-11-12','operation-start-time':'10:00','operation-end-time':'18:00',
-        'operation-daily-rate':'150','operation-street':'Rua das Flores','operation-number':'120',
-        'operation-city':'São Paulo','operation-state':'SP','operation-details':'Operação urgente',
+        'operation-daily-rate':'150','operation-details':'Operação urgente',
       };
       for (const [id,value] of Object.entries(fields)) app.elements().find(node => node.props.id===id).props.onChange({target:{value}});
       await app.flush();
@@ -385,53 +391,47 @@ test('urgent publication warns about its reduced window, but publication at star
   }
 });
 
+const fillOperation = (app, overrides = {}) => {
+  const fields = {
+    'operation-role': 'Garçom', 'operation-date': '2099-01-01', 'operation-start-time': '18:00',
+    'operation-end-time': '23:00', 'operation-daily-rate': '150', 'operation-details': 'Detalhes do plantão', ...overrides,
+  };
+  for (const [id, value] of Object.entries(fields)) {
+    const input = app.elements().find(node => node.props.id === id);
+    assert.ok(input, id);
+    input.props.onChange({ target: { value } });
+  }
+};
+const submitOperation = async app => {
+  await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+  await app.flush();
+};
+
 test('publication persists before optional invitations and skipping never republishes or hires', async () => {
   const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
   try {
     await app.flush();
-    const fields = {
-      'operation-role': 'Garçom',
-      'operation-date': '2099-01-01',
-      'operation-start-time': '18:00',
-      'operation-end-time': '23:00',
-      'operation-daily-rate': '150',
-      'operation-street': 'Rua das Flores',
-      'operation-number': '120',
-      'operation-city': 'São Paulo',
-      'operation-state': 'SP',
-      'operation-details': 'Detalhes do plantão',
-    };
-    for (const [id, value] of Object.entries(fields)) {
-      const input = app.elements().find(node => node.props.id === id);
-      assert.ok(input, id);
-      input.props.onChange({ target: { value } });
-    }
+    fillOperation(app);
     await app.flush();
     assert.match(app.html(), /Publicar Operação/);
-    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
-    await app.flush();
+    await submitOperation(app);
     assert.match(app.html(), /Operação publicada com sucesso/);
     assert.match(app.html(), /href="\/restaurant\/demands\/published-demand\?view=talents"/);
     assert.match(app.html(), /Convidar Agora/);
     app.button('Pular').props.onClick();
     assert.deepEqual(app.db.navigation, ['/restaurant/demands/published-demand']);
-    assert.deepEqual(app.db.calls.map(call => call.name), ['pending_operational_reviews', 'save_geocoded_work_location', 'create_restaurant_demand']);
-    assert.equal(app.db.calls.at(-1).args.p_value, 150);
-    assert.equal(Object.hasOwn(app.db.calls.at(-1).args, 'p_quantity'), false);
-    assert.equal(app.db.calls.at(-1).args.p_title, 'Garçom');
-    assert.equal(app.db.calls.at(-1).args.p_description, 'Detalhes do plantão');
-    assert.equal(app.db.calls.at(-1).args.p_location_source, 'catalog');
-    assert.equal(app.db.calls.at(-1).args.p_work_location_id, 'operation-location');
-    assert.equal(app.db.calls.at(-1).args.p_location_revision, 1);
-    assert.equal(Object.hasOwn(app.db.calls.at(-1).args, 'p_event_id'), false);
-    assert.deepEqual(app.db.geocoded, [{
-      location_name: 'Local da Operação', address: 'Rua das Flores', number: '120', neighborhood: '',
-      city: 'São Paulo', state: 'SP', postal_code: '', latitude: null, longitude: null,
-    }]);
-    assert.deepEqual(app.db.calls.at(-2).args, {
-      p_name: 'Local da Operação', p_address: 'Rua das Flores', p_number: '120',
-      p_city: 'São Paulo', p_state: 'SP', p_latitude: -23.5, p_longitude: -46.6,
-    });
+    assert.deepEqual(app.db.calls.map(call => call.name), ['pending_operational_reviews', 'create_restaurant_demand']);
+    assert.deepEqual(app.db.locationLoads, ['company']);
+    const args = app.db.calls.at(-1).args;
+    assert.equal(args.p_value, 150);
+    assert.equal(Object.hasOwn(args, 'p_quantity'), false);
+    assert.equal(args.p_title, 'Garçom');
+    assert.equal(args.p_description, 'Detalhes do plantão');
+    assert.equal(args.p_location_source, 'catalog');
+    assert.equal(args.p_work_location_id, 'primary');
+    assert.equal(args.p_location_revision, 3);
+    assert.equal(Object.hasOwn(args, 'p_event_id'), false);
+    assert.equal(Object.hasOwn(args, 'p_latitude'), false);
     assert.deepEqual(app.db.queries, []);
   } finally { app.unmount(); }
 });
@@ -447,97 +447,147 @@ test('pending reviews block the creation form without blocking access to the eva
   } finally { app.unmount(); }
 });
 
-test('operation publication uses existing specialty and work-location contracts for one vacancy', async () => {
+test('operation publication uses the primary operational location without typing an address', async () => {
   const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
   globalThis.window.location.search = '?event=old-event&event_id=old-event';
+  app.db.locations = [
+    primaryLocation({ id: 'branch', name: 'Filial', is_default: false, revision: 7 }),
+    primaryLocation(),
+    primaryLocation({ id: 'pending', name: 'Sem confirmação', is_default: false, geocoding_status: 'needs_review', latitude: null, longitude: null }),
+    primaryLocation({ id: 'old', name: 'Arquivado', is_default: false, archived_at: '2026-01-02T00:00:00Z' }),
+  ];
   try {
     await app.flush();
-    assert.doesNotMatch(app.html(), />[^<]*(?:Evento|Agenda|demanda|Demanda|Profissionais necessários|quantidade de profissionais)/);
-    assert.match(app.html(), /Publique uma oportunidade e receba candidaturas de profissionais disponíveis/);
-    assert.match(app.html(), /Quando\?/);
-    assert.match(app.html(), /Local da Operação/);
-    assert.doesNotMatch(app.html(), /CEP|Bairro|País|Latitude|Longitude|endereço principal/);
+    const html = app.html();
+    assert.doesNotMatch(html, />[^<]*(?:Evento|Agenda|demanda|Demanda|Profissionais necessários|quantidade de profissionais)/);
+    assert.match(html, /Publique uma oportunidade e receba candidaturas de profissionais disponíveis/);
+    assert.match(html, /Quando\?/);
+    assert.match(html, /Onde\?/);
+    assert.match(html, /Local da operação/);
+    assert.doesNotMatch(html, /operation-street|operation-number|operation-city|Latitude|Longitude/);
+    const select = app.elements().find(node => node.props.id === 'operation-location');
+    assert.equal(select.props.value, 'primary', 'primary location is preselected');
+    assert.match(html, /Matriz \(principal\)/);
+    assert.match(html, /Rua das Flores, 120 · Centro · São Paulo\/SP · CEP 01001-000/);
+    assert.doesNotMatch(html, /Sem confirmação<\/option>|Arquivado<\/option>/);
+    assert.match(html, /1 local aguarda confirmação/);
+    assert.match(html, /href="\/restaurant\/locations"/);
     const date = app.elements().find(node => node.type === ui.TextInput && node.props.type === 'date');
     assert.equal(date.props.value, '');
-    const fields = {
-      'operation-role': 'Garçom',
-      'operation-date': '2099-01-01',
-      'operation-start-time': '22:00',
-      'operation-end-time': '03:00',
-      'operation-daily-rate': '180',
-      'operation-street': 'Rua das Flores',
-      'operation-number': '120',
-      'operation-city': 'São Paulo',
-      'operation-state': 'SP',
-      'operation-details': 'Informações da operação',
-    };
-    for (const [id, value] of Object.entries(fields)) {
-      const input = app.elements().find(node => node.props.id === id);
-      assert.ok(input, id);
-      input.props.onChange({ target: { value } });
-    }
+    select.props.onChange({ target: { value: 'branch' } });
+    fillOperation(app, { 'operation-start-time': '22:00', 'operation-end-time': '03:00', 'operation-daily-rate': '180', 'operation-details': 'Informações da operação' });
     await app.flush();
-    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
-    await app.flush();
-    assert.deepEqual(app.db.calls.at(-2), { name: 'save_geocoded_work_location', args: {
-      p_name: 'Local da Operação', p_address: 'Rua das Flores', p_number: '120',
-      p_city: 'São Paulo', p_state: 'SP', p_latitude: -23.5, p_longitude: -46.6,
-    } });
+    await submitOperation(app);
     assert.deepEqual(app.db.calls.at(-1), { name: 'create_restaurant_demand', args: {
       p_title: 'Garçom', p_description: 'Informações da operação', p_job_date: '2099-01-01',
       p_start_time: '22:00', p_end_time: '03:00', p_value: 180,
-      p_location_source: 'catalog', p_work_location_id: 'operation-location', p_location_revision: 1,
+      p_location_source: 'catalog', p_work_location_id: 'branch', p_location_revision: 7,
     } });
     assert.deepEqual(app.db.queries, []);
     assert.match(app.html(), /Operação publicada com sucesso/);
   } finally { app.unmount(); }
 });
 
-test('work-location persistence errors remain visible and never publish without the submitted location', async () => {
+test('publication errors remain visible and never publish without a confirmed location', async () => {
   const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
-  app.db.rpcError = { message: 'Não foi possível salvar o local informado.' };
+  app.db.rpcError = { message: 'Confirme a localização do local antes de publicar a operação.' };
   try {
     await app.flush();
-    const amount = app.elements().find(node => node.type === ui.TextInput && node.props.id === 'operation-daily-rate');
-    amount.props.onChange({ target: { value: '150' } });
+    fillOperation(app);
     await app.flush();
-    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
-    await app.flush();
-    assert.match(app.html(), /Não foi possível salvar o local informado/);
+    await submitOperation(app);
+    assert.match(app.html(), /Confirme a localização do local antes de publicar a operação/);
     assert.doesNotMatch(app.html(), /Operação publicada com sucesso/);
-    assert.equal(app.db.calls.filter(call => call.name === 'create_restaurant_demand').length, 0);
-    assert.equal(app.db.calls.at(-1).name, 'save_geocoded_work_location');
+    assert.equal(app.elements().find(node => node.props.id === 'operation-details').props.value, 'Detalhes do plantão');
     assert.equal(app.elements().find(node => node.type === 'fieldset').props.disabled, false);
+  } finally { app.unmount(); }
+
+  const empty = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
+  empty.db.locations = [primaryLocation({ geocoding_status: 'failed', latitude: null, longitude: null })];
+  try {
+    await empty.flush();
+    assert.match(empty.html(), /Nenhum local confirmado disponível/);
+    fillOperation(empty);
+    await empty.flush();
+    assert.match(empty.html(), /Nenhum local confirmado disponível para esta data/);
+    await submitOperation(empty);
+    assert.match(empty.html(), /Selecione um local operacional confirmado antes de publicar/);
+    assert.equal(empty.db.calls.some(call => call.name === 'create_restaurant_demand'), false);
+  } finally { empty.unmount(); }
+});
+
+test('a new or one-off location is registered inline and selected once confirmed', async () => {
+  const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
+  app.db.locations = [];
+  try {
+    await app.flush();
+    fillOperation(app, { 'operation-date': '2099-01-01' });
+    await app.flush();
+    app.button('+ Novo local').props.onClick();
+    await app.flush();
+    const form = app.elements().find(node => node.type === LocationFormStub);
+    assert.ok(form, 'inline location form');
+    assert.equal(form.props.temporaryUntil, '2099-01-01');
+    assert.equal(form.props.allowTemporary, true);
+    assert.equal(form.props.makeDefault, true, 'first location becomes the primary address');
+    form.props.onSaved(primaryLocation({ id: 'event-hall', is_default: false, kind: 'temporary', valid_until: '2099-01-01', geocoding_status: 'needs_review' }));
+    await app.flush();
+    assert.ok(app.elements().find(node => node.type === LocationFormStub), 'form stays open until the position is confirmed');
+    app.elements().find(node => node.type === LocationFormStub).props.onSaved(primaryLocation({
+      id: 'event-hall', name: 'Salão de festas', is_default: false, kind: 'temporary', valid_until: '2099-01-01', revision: 5,
+    }));
+    await app.flush();
+    assert.equal(app.elements().find(node => node.type === LocationFormStub), undefined);
+    assert.equal(app.elements().find(node => node.props.id === 'operation-location').props.value, 'event-hall');
+    assert.match(app.html(), /Salão de festas \(temporário\)/);
+    app.elements().find(node => node.props.id === 'operation-date').props.onChange({ target: { value: '2099-01-02' } });
+    await app.flush();
+    assert.match(app.html(), /Nenhum local confirmado disponível para esta data/, 'temporary locations expire after their date');
+    app.elements().find(node => node.props.id === 'operation-date').props.onChange({ target: { value: '2099-01-01' } });
+    await app.flush();
+    await submitOperation(app);
+    assert.equal(app.db.calls.at(-1).args.p_work_location_id, 'event-hall');
+    assert.equal(app.db.calls.at(-1).args.p_location_revision, 5);
   } finally { app.unmount(); }
 });
 
-test('operation is not published when geocoding fails and submitted address is preserved', async () => {
-  const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
-  app.db.geocodingError = 'Endereço não localizado.';
+test('locations page manages primary, temporary and archived locations through catalog helpers', async () => {
+  const app = mount(null, '../app/restaurant/locations/page.tsx');
+  app.db.locations = [
+    primaryLocation(),
+    primaryLocation({ id: 'branch', name: 'Filial', is_default: false, geocoding_status: 'needs_review', latitude: null, longitude: null }),
+    primaryLocation({ id: 'hall', name: 'Salão', is_default: false, kind: 'temporary', valid_until: '2099-01-01' }),
+    primaryLocation({ id: 'legacy', name: 'Antigo', is_default: false, postal_code: '', geocoding_status: 'pending', latitude: null, longitude: null }),
+    primaryLocation({ id: 'old', name: 'Arquivado', is_default: false, archived_at: '2026-01-02T00:00:00Z' }),
+  ];
   try {
     await app.flush();
-    const fields = {
-      'operation-role': 'Garçom',
-      'operation-date': '2099-01-01',
-      'operation-start-time': '18:00',
-      'operation-end-time': '23:00',
-      'operation-daily-rate': '150',
-      'operation-street': 'Rua Inexistente',
-      'operation-number': '120',
-      'operation-city': 'São Paulo',
-      'operation-state': 'SP',
-      'operation-details': 'Informações da operação',
-    };
-    for (const [id, value] of Object.entries(fields)) {
-      app.elements().find(node => node.props.id === id).props.onChange({ target: { value } });
-    }
+    const html = app.html();
+    assert.match(html, /Locais operacionais/);
+    assert.match(html, /Principal/);
+    assert.match(html, /Temporário até 01\/01\/2099/);
+    assert.match(html, /Confirme a posição exata/);
+    assert.match(html, /Completar endereço \(CEP\)/, 'legacy rows without CEP must be completed before use');
+    assert.doesNotMatch(html, /Arquivado<\/h2>/);
+    assert.equal(app.elements().filter(node => node.type === ui.Button && node.props.children === 'Tornar principal').length, 2,
+      'only permanent non-primary locations can become primary');
+    app.button('Tornar principal').props.onClick();
     await app.flush();
-    await app.elements().find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    assert.deepEqual(app.db.calls.at(-1), { name: 'manage_work_location', args: { id: 'branch', action: 'set_default' } });
+    assert.match(app.html(), /Endereço principal atualizado/);
+    assert.equal(app.db.locationLoads.length, 2, 'catalog reloads after each change');
+    app.button('Confirmar no local (GPS)').props.onClick();
     await app.flush();
-    assert.match(app.html(), /Endereço não localizado/);
-    assert.doesNotMatch(app.html(), /Operação publicada com sucesso/);
-    assert.equal(app.db.calls.filter(call => call.name === 'save_geocoded_work_location').length, 0);
-    assert.equal(app.db.calls.some(call => call.name === 'save_work_location' || call.name === 'create_restaurant_demand'), false);
-    assert.equal(app.elements().find(node => node.props.id === 'operation-street').props.value, 'Rua Inexistente');
+    assert.deepEqual(app.db.calls.at(-1), { name: 'confirm_work_location', args: { id: 'branch', method: 'device' } });
+    app.button('Ver arquivados (1)').props.onClick();
+    await app.flush();
+    app.button('Restaurar').props.onClick();
+    await app.flush();
+    assert.deepEqual(app.db.calls.at(-1), { name: 'manage_work_location', args: { id: 'old', action: 'restore' } });
+    app.button('+ Novo local').props.onClick();
+    await app.flush();
+    const form = app.elements().find(node => node.type === LocationFormStub);
+    assert.equal(form.props.makeDefault, false);
+    assert.equal(form.props.location, null);
   } finally { app.unmount(); }
 });

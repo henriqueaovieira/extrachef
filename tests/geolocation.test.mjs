@@ -182,16 +182,17 @@ test('geocoder delegates only validated input and returns explicit adapter failu
 test('job creation no longer captures publisher GPS and worker applications have no GPS gate', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.doesNotMatch(create, /getDeviceCoordinates|navigator\.geolocation/);
-  assert.match(create, /resolveWorkLocation/);
-  assert.match(create, /rpc\('save_geocoded_work_location'/);
+  // Coordinates are produced once, on the server, when the location is registered — never per operation.
+  assert.doesNotMatch(create, /resolveWorkLocation|save_geocoded_work_location|p_latitude|p_longitude/);
   assert.match(create, /rpc\('create_restaurant_demand'/);
   assert.match(create, /p_location_source: 'catalog'/);
-  assert.match(create, /p_latitude: location\.latitude/);
-  assert.match(create, /p_longitude: location\.longitude/);
+  assert.match(create, /locationSelectable\(location, jobDate\)/);
   const worker = source('../app/worker/dashboard/page.tsx');
   const application = worker.slice(worker.indexOf('const handleApply'), worker.indexOf('const shareJob'));
   assert.match(application, /from\('applications'\)\.insert/);
   assert.doesNotMatch(application, /workerLocation|getDeviceCoordinates|distanceMeters/);
-  assert.match(create, /validCoordinates\(location\.latitude, location\.longitude\)/);
-  assert.match(create, /p_work_location_id: savedLocation\.id/);
+  assert.match(create, /p_work_location_id: selectedLocation\.id/);
+  const client = source('../lib/locations/client.ts');
+  assert.doesNotMatch(client, /p_latitude: location|save_geocoded_work_location/);
+  assert.match(client, /rpc\('confirm_work_location'/);
 });

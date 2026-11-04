@@ -108,6 +108,16 @@ test('Photon street matching tolerates accents, abbreviations and missing house 
   fetch.mock.mockImplementation(async () => Response.json(collection(
     feature({ postcode: '' }))));
   assert.equal((await provider.geocode({ ...address, postal_code: '01001-000' })).latitude, -23.55);
+
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ postcode: '13520-000', city: 'São Pedro', housenumber: '' }))));
+  assert.equal((await provider.geocode({ ...address, city: 'São Pedro', postal_code: '13520-123' })).latitude, -23.55,
+    'a city-wide CEP only needs the same 5-digit region');
+  await assert.rejects(provider.geocode({ ...address, city: 'São Pedro', postal_code: '13521-123' }),
+    error => error.code === 'not_found', 'a city-wide CEP from another region is rejected');
+  fetch.mock.mockImplementation(async () => Response.json(collection(feature({ postcode: '01001-001' }))));
+  await assert.rejects(provider.geocode({ ...address, postal_code: '01001-002' }), error => error.code === 'not_found',
+    'specific CEPs must match exactly');
 });
 
 test('Photon rejects imprecise, wrong country/state/city, mismatched and ambiguous addresses', async t => {

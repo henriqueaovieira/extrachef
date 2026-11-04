@@ -8,6 +8,7 @@ type AccountRole = 'restaurant' | 'worker';
 const links: Record<AccountRole, Array<{ href: string; label: string; description: string }>> = {
   restaurant: [
     { href: '/restaurant/profile', label: 'Meu Perfil', description: 'Sua conta e informações da empresa' },
+    { href: '/restaurant/locations', label: 'Locais operacionais', description: 'Endereço principal e locais das operações' },
     { href: '/restaurant/history', label: 'Histórico Operacional', description: 'Operações concluídas e avaliações' },
     { href: '/notifications', label: 'Notificações', description: 'Atualizações importantes' },
     { href: '/settings/privacy', label: 'Privacidade e Preferências', description: 'Dados e notificações' },

@@ -1,30 +1,54 @@
 # Geolocalizacao operacional
 
-## Contrato definitivo
+## Contrato definitivo: locais operacionais
 
-O navegador consulta somente `POST /api/geocode`. A rota autentica a sessao,
-confere papel e conta ativa, valida o endereco e chama `lib/geocoding`.
-Nenhum endpoint de fornecedor ou credencial e enviado ao navegador.
+Coordenadas sao geradas e confirmadas uma unica vez, no cadastro do local
+(`work_locations`), e nunca por operacao. Nova Operacao apenas seleciona um
+local confirmado; o endereco principal do restaurante vem pre-selecionado.
 
-Fluxo:
+Cadastro (`/restaurant/locations` ou "+ Novo local" em Nova Operacao):
 
-1. Formulario exige rua, numero, cidade e UF.
-2. API consulta cache persistente do restaurante.
-3. Miss/expiracao exige reserva distribuida antes de consultar Photon.
-4. Adapter valida GeoJSON, ordem longitude/latitude, pais BR, rua, numero,
-   municipio e UF. Resultados genericos ou ambiguos sao recusados.
-5. Resultado normalizado e persistido pelo servidor.
-6. `save_geocoded_work_location` oficial salva o catalogo; um trigger exige
-   correspondencia com cache server-only valido do mesmo restaurante/endereco.
-7. Demanda cria snapshot `ready` em jobs.
+1. Formulario exige CEP (8 digitos), rua, numero, cidade e UF; o CEP preenche
+   o endereco via `GET /api/postal-code/[cep]` (ViaCEP, server-side).
+2. `POST /api/locations` (ou `PATCH /api/locations/[id]`) autentica sessao,
+   papel e conta ativa e chama `save_restaurant_location` com a sessao do
+   usuario. O navegador nunca envia coordenadas.
+3. O servidor geocodifica o endereco SALVO via `lib/geocoding` (cache
+   persistente, reserva distribuida, adapter Photon com validacao de pais, UF,
+   municipio, rua, numero e CEP; CEP generico `xxxxx-000` compara 5 digitos).
+4. `apply_work_location_geocode` copia as coordenadas do cache server-only:
+   - numero encontrado: `resolved`, precisao `house`;
+   - somente rua: `needs_review` com coordenada candidata. O restaurante
+     confirma no local (GPS, precisao <= 50 m e ate 1 km do candidato) ou aceita
+     explicitamente a posicao aproximada (`confirm_work_location`).
+5. Falhas definitivas (`not_found`, `ambiguous`, `invalid_address`) gravam
+   `failed` via `record_work_location_geocoding_failure`; falhas transitorias
+   mantem `pending` para nova tentativa (`PATCH` com `action: 'locate'`).
+6. Alterar o endereco incrementa `address_version` e invalida coordenadas e
+   confirmacao.
+
+Publicacao e operacao:
+
+7. `create_restaurant_demand` aceita apenas local ativo, `resolved` e, se
+   temporario, valido na data da operacao; o job recebe snapshot `ready`.
 8. Recrutamento, candidatura, convite, contratacao e substituicao exigem prontidao.
 9. GPS e `issue_operational_code` preservam raio de 100 m, participante atual,
    validacao bilateral, pagamento e checkout.
 
-Falhas nao geram coordenadas nulas nem sucesso aparente. O formulario preserva
-os dados para nova tentativa. Nao ha fallback para centro de cidade/CEP,
-GPS do publicador ou outro fornecedor.
+Locais: um principal por restaurante (permanente), varios permanentes e
+temporarios com `valid_until` (ate 1 ano; "Usar apenas nesta operacao" usa a
+data da operacao). Locais legados sem CEP permanecem no catalogo, mas so podem
+ser usados apos completar o endereco.
 
+Falhas nao geram coordenadas nulas nem sucesso aparente. Nao ha fallback para
+centro de cidade/CEP, GPS do publicador ou outro fornecedor.
+
+## Migrations e ordem de implantacao
+
+1. `20261105000000_restaurant_operational_locations.sql` junto com o deploy do
+   frontend novo (a partir dela o fluxo antigo exige CEP).
+2. `20261105010000_revoke_client_geocoded_locations.sql` apos o frontend novo
+   estar ativo: revoga `save_geocoded_work_location` de clientes.
 ## Configuracao server-only
 
 ```dotenv
@@ -32,6 +56,9 @@ GEOCODING_PROVIDER=photon
 GEOCODING_ENDPOINT=
 GEOCODING_TIMEOUT=10000
 GEOCODING_CACHE_TTL=7776000
+# Opcional (consulta de CEP, padrao ViaCEP)
+POSTAL_CODE_ENDPOINT=https://viacep.com.br/ws
+POSTAL_CODE_TIMEOUT=4000
 ```
 
 `GEOCODING_ENDPOINT` e a URL base HTTPS da instancia, sem `/api` ou `/reverse`,
