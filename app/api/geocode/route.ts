@@ -8,9 +8,17 @@ import { GeocodingError } from '@/lib/geocoding/types';
 export async function POST(request: NextRequest) {
   const { supabase, finish } = createRequestClient(request);
   const requestId = randomUUID();
+  // TEMP DEBUG: remove after geocoding configuration diagnosis.
+  let debugStage = 'route_entered';
+  const debug = (stage: string) => {
+    debugStage = stage;
+    console.error('GEOCODE ROUTE DEBUG', { requestId, stage });
+  };
+  debug('route_entered');
   const reply = (body: object, status: number) => {
     const response = finish(NextResponse.json(body, { status }));
     response.headers.set('X-Request-Id', requestId);
+    response.headers.set('X-Geocode-Debug-Stage', debugStage);
     return response;
   };
   const { data: auth, error: authError } = await supabase.auth.getUser();
@@ -49,9 +57,13 @@ export async function POST(request: NextRequest) {
   catch (error) { return reply({ error: error instanceof Error ? error.message : 'Endereço inválido.' }, 400); }
 
   try {
-    const result = await createGeocodingService(auth.user.id, requestId).geocode(location);
+    debug('before_create_geocoding_service');
+    const service = createGeocodingService(auth.user.id, requestId);
+    debug('geocoding_service_created');
+    const result = await service.geocode(location);
     return reply({ latitude: result.latitude, longitude: result.longitude }, 200);
   } catch (error) {
+    debug(`caught_${error instanceof GeocodingError ? error.code : 'internal'}`);
     console.error('geocoding', { requestId, event: 'request_failed',
       code: error instanceof GeocodingError ? error.code : 'internal' });
     if (error instanceof GeocodingError) {
