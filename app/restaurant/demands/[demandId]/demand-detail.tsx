@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Button, EmptyState, LoadingSkeleton, TextArea, TextInput, Toast } from '@/app/components/ui';
+import { Badge, Button, EmptyState, LoadingSkeleton, TextArea, TextInput, Toast } from '@/app/components/ui';
 import { DemandActions } from '@/app/components/demand-card';
 import DemandPersonSummary from '@/app/components/demand-person';
 import DemandTalentNetwork from '@/app/components/demand-talent-network';
@@ -11,7 +11,7 @@ import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
 import { buildDemands, canHireDemand, canRecruitDemand, demandDate, demandWindow, hasOperationalLocation, loadDemands, readDemandPages, recruitmentWindow, type Demand, type DemandApplication, type DemandReserve } from '@/lib/demands';
 import { demandMapLinks, eventLabels, loadDemandPeople, shareDemand, signDemandPhotos, uniqueDemandCandidates, type DemandEvent, type DemandPerson } from '@/lib/demand-detail';
-import { loadOperationalAssignments, loadPendingReviews, operationNextAction, type OperationalAssignment, type PendingReview } from '@/lib/operations';
+import { getOperationContinuation, getOperationState, getOperationSummary, loadOperationalAssignments, loadPendingReviews, type OperationalAssignment, type PendingReview } from '@/lib/operations';
 import { ReputationDetails } from '@/app/components/operational-reputation';
 import OperationFlow from '@/app/components/operation-flow';
 
@@ -82,7 +82,8 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
   const [events, setEvents] = useState<DemandEvent[]>([]);
   const [operations, setOperations] = useState<OperationalAssignment[]>([]);
   const [replacementInvites, setReplacementInvites] = useState<Array<{ worker_id: string; status: string; replacement_assignment_id: string | null }>>([]);
-  const [operationsError, setOperationsError] = useState('');
+  const [operationalErrors, setOperationalErrors] = useState({ sources: '', reviews: '' });
+  const operationsError = [operationalErrors.sources, operationalErrors.reviews].filter(Boolean).join(' ');
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
   const [confirmHiring, setConfirmHiring] = useState<DemandApplication | null>(null);
   const [historyError, setHistoryError] = useState('');
@@ -122,12 +123,13 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
             .select('worker_id, status, replacement_assignment_id').eq('demand_id', demandId).order('id').range(offset, offset + 499)),
         ]);
         if (active) {
-          setOperations(assignments); setOperationsError(''); setNow(new Date());
+          setOperations(assignments); setOperationalErrors((errors) => ({ ...errors, sources: '' })); setNow(new Date());
           setDemand(buildDemands(data.jobs, data.applications, data.reserves)[0] ?? null);
           setReserves(data.reserves); setReplacementInvites(invitations);
         }
       } catch (error) {
-        if (active) setOperationsError(error instanceof Error ? error.message : 'Não foi possível atualizar as etapas operacionais.');
+        if (active) setOperationalErrors((errors) => ({ ...errors,
+          sources: error instanceof Error ? error.message : 'Não foi possível atualizar as etapas operacionais.' }));
       } finally { refreshing = false; }
     }
     const timer = window.setInterval(() => void refresh(), 15_000);
@@ -142,7 +144,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
       setError('');
       setHistoryError('');
       setPeopleError('');
-      setOperationsError('');
+      setOperationalErrors((errors) => ({ ...errors, sources: '' }));
       try {
         const data = await loadDemands(supabase, demandId);
         if (mounted) {
@@ -178,11 +180,13 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
           setHistoryError('Não foi possível carregar a linha do tempo.');
         }
         if (results[2].status === 'fulfilled') setOperations(results[2].value);
-        else { setOperations([]); setOperationsError('Não foi possível carregar check-in, pagamento e checkout. Atualize a operação.'); }
-        if (results[3].status === 'fulfilled') setPendingReviews(results[3].value.filter((review) => data.jobs.some((job) => job.id === review.job_id)));
-        else setOperationsError('Não foi possível conferir as avaliações pendentes. Atualize a operação.');
+        else { setOperations([]); setOperationalErrors((errors) => ({ ...errors, sources: 'Não foi possível carregar check-in, pagamento e checkout. Atualize a operação.' })); }
+        if (results[3].status === 'fulfilled') {
+          setPendingReviews(results[3].value.filter((review) => data.jobs.some((job) => job.id === review.job_id)));
+          setOperationalErrors((errors) => ({ ...errors, reviews: '' }));
+        } else setOperationalErrors((errors) => ({ ...errors, reviews: 'Não foi possível conferir as avaliações pendentes. Atualize a operação.' }));
         if (results[4].status === 'fulfilled') setReplacementInvites(results[4].value);
-        else setOperationsError('Não foi possível conferir os convites de substituição. Atualize a operação.');
+        else setOperationalErrors((errors) => ({ ...errors, sources: 'Não foi possível conferir os convites de substituição. Atualize a operação.' }));
       } catch (error) {
         if (mounted) setError(error instanceof Error ? error.message : 'Não foi possível carregar a operação.');
       } finally { if (mounted) setLoading(false); }
@@ -230,13 +234,14 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
   const recruiting = Boolean(demand && canRecruitDemand(demand, now));
   const canConfirmHire = Boolean(confirmHiring && (canHire || (reserveActive && replacementInvites.some((invite) =>
     invite.worker_id === confirmHiring.worker_id && invite.replacement_assignment_id === interrupted?.id && invite.status === 'accepted'))));
-  const pendingOperation = operationsError ? undefined : operations.find((operation) => !operation.interruption && !operation.checkout_at);
-  const nextAction = pendingReviews.length ? { label: 'Avaliar experiência', href: `/reviews/${pendingReviews[0].job_id}` }
-    : reserveActive ? { label: 'Confirmar substituição', href: '#reserve-heading' }
-    : pendingOperation && demand ? operationNextAction(pendingOperation, demandWindow(demand.job).start, demandWindow(demand.job).end, 'restaurant', now)
-    : interrupted ? { label: 'Decidir sobre a ocorrência', href: '#reserve-heading' }
-    : { label: candidates.length ? 'Analisar candidatos' : recruiting ? 'Convidar profissionais' : 'Ver histórico',
-      href: candidates.length ? `${base}?view=candidates` : recruiting ? `${base}?view=talents` : '#timeline-heading' };
+  const coreInput = demand ? {
+    demand, assignments: operations, now, canHire: Boolean(canHire), canRecruit: recruiting,
+    unavailable: Boolean(operationsError), reviews: pendingReviews,
+    windows: new Map(demand.jobs.map((job) => [job.id, demandWindow(job)])),
+  } : null;
+  const summary = coreInput ? getOperationSummary(coreInput) : null;
+  const operationState = coreInput ? getOperationState(coreInput) : null;
+  const continuation = coreInput ? getOperationContinuation(coreInput) : null;
   const replacementAction = async (operation: 'close_interrupted' | 'seek_replacement' | 'invite', workerId?: string) => {
     if (busy) return;
     setBusy(workerId ?? operation); setActionError(''); setNotice('');
@@ -291,16 +296,16 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
   </section>;
   const heading = view === 'talents' ? 'Rede de Talentos' : view === 'candidates' ? 'Candidatos' : view === 'profile' ? 'Perfil do profissional' : demand?.job.title ?? 'Detalhes da Operação';
   return (
-    <main className="min-h-screen bg-[#fafaf9] px-5 py-6 pb-28 text-gray-950 sm:px-8">
+    <main className="ec-operations-experience min-h-screen bg-[#fafaf9] px-5 py-6 pb-28 text-gray-950 sm:px-8">
       <section className="mx-auto max-w-2xl space-y-6">
-        <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             <Link href={view || action ? base : '/restaurant/demands'} className="inline-flex min-h-11 items-center text-xs font-semibold text-gray-600">← {view || action ? 'Voltar à operação' : 'Voltar'}</Link>
             <h1 className="mt-2 break-words text-2xl font-semibold tracking-[-0.04em] sm:text-3xl">{heading}</h1>
           </div>
-          {demand && !loading && <details className="relative z-20 mt-1">
-            <summary aria-label="Ações da operação" className="grid size-11 cursor-pointer list-none place-items-center rounded-full border border-gray-200 bg-white text-xl">···</summary>
-            <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
+          {demand && !loading && <details className="relative z-20 mt-1 open:w-full">
+            <summary aria-label="Ações da operação" className="ml-auto grid size-11 cursor-pointer list-none place-items-center rounded-full border border-gray-200 bg-white text-xl">···</summary>
+            <div className="relative ml-auto mt-2 w-64 max-w-full rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
               <DemandActions demand={demand} detailed onChanged={() => setRetry((value) => value + 1)} />
               {!demand.completed && !demand.cancelled && <p className="mt-3 text-xs leading-5 text-gray-500">Arquivar Operação disponível após concluir ou cancelar.</p>}
             </div>
@@ -316,16 +321,13 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
             {profile ? <>
               <DemandPersonSummary person={profile} />
               {profile.reputation && <ReputationDetails reputation={profile.reputation} />}
-              <h2 className="font-semibold">Experiência</h2>
-              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{profile.experience || 'Experiência não compartilhada pelo profissional.'}</p>
-              <p className="text-xs text-gray-500">{profile.completed_operations} operações concluídas com sua empresa.</p>
               <Link href={`${base}?view=talents`} className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Convidar pela Rede de Talentos →</Link>
             </> : <p className="text-sm text-gray-500">Perfil indisponível para esta conta.</p>}
           </section>
         ) : view === 'candidates' ? (
           <section className="space-y-4">
             <p className="text-sm text-gray-500">{candidates.length} candidatos aguardando decisão</p>
-            {peopleError && <Toast tone="info">{peopleError}</Toast>}
+            {peopleError && <Toast tone="danger">{peopleError}</Toast>}
             {actionError && <Toast tone="error">{actionError}</Toast>}
             {notice && <Toast tone="info">{notice}</Toast>}
             {candidates.length ? candidates.map((candidate) => renderCandidate(candidate)) : <EmptyState title="Ainda não há candidatos." description="Compartilhe a operação para encontrar ajuda."
@@ -336,49 +338,78 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
             {action === 'edit' && <Toast tone="info">Esta operação já possui candidaturas ou foi iniciada. Não é possível editar os dados combinados com a equipe.</Toast>}
             {demand.archived && <Toast tone="info">Operação arquivada. Você pode restaurá-la pelo menu de ações.</Toast>}
             {!demand.jobs.every(hasOperationalLocation) && <Toast tone="error">Localização operacional pendente. Novas candidaturas e contratações estão bloqueadas. Solicite a revisão do endereço ao suporte.</Toast>}
-            <section aria-labelledby="summary-heading" className="space-y-5 rounded-3xl border border-gray-200 bg-white p-5 sm:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 id="summary-heading" className="text-xs font-semibold uppercase tracking-widest text-gray-500">Informações da Operação</h2>
-                <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${demand.health === 'risk' ? 'bg-red-50 text-red-800' : demand.health === 'safe' ? 'bg-emerald-50 text-emerald-800' : 'bg-orange-50 text-orange-900'}`}>{demand.status}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div><p className="text-xs text-gray-500">Data</p><p className="mt-1 font-semibold">{demandDate(demand.job.job_date, now)}</p><time dateTime={demand.job.job_date} className="mt-1 block text-xs text-gray-500">{demand.job.job_date.split('-').reverse().join('/')}</time></div>
-                <div><p className="text-xs text-gray-500">Horário</p><p className="mt-1 font-medium">{demand.job.start_time.slice(0, 5)} às {demand.job.end_time.slice(0, 5)}{demandWindow(demand.job).start.toDateString() !== demandWindow(demand.job).end.toDateString() ? ' (+1 dia)' : ''}</p></div>
-                <div className="min-w-0"><p className="text-xs text-gray-500">Valor da diária</p><p className="mt-1 break-words text-xl font-semibold tracking-tight">{Number(demand.job.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-              </div>
-              <div className="border-t border-gray-100 pt-4">
-                <a href="#team-heading" className="block min-w-0 rounded-xl bg-gray-50 p-3 text-sm">
-                  {hired.length ? <>
-                    <span className="block font-semibold">Profissional da Operação</span>
-                    <span className="text-gray-600">Contratação confirmada</span>
-                  </> : <>
-                    <span className="block text-xl font-semibold">{candidates.length}</span>
-                    <span className="text-gray-600">Candidatos</span>
-                  </>}
-                </a>
-              </div>
-              <section aria-labelledby="location-heading" className="space-y-2 border-t border-gray-100 pt-4">
-                <h3 id="location-heading" className="scroll-mt-6 text-sm font-semibold">Local da Operação</h3>
-                <p className="break-words text-sm font-medium">{demand.job.location_name || 'Local a definir'}</p>
-                <address className="space-y-1 break-words text-sm leading-6 text-gray-500 not-italic">
-                  <p>{[demand.job.work_address, demand.job.work_number, demand.job.work_neighborhood].filter(Boolean).join(', ') || 'Endereço ainda não informado.'}</p>
-                  {(demand.job.work_city || demand.job.work_state || demand.job.work_postal_code) && <p>{[[demand.job.work_city, demand.job.work_state].filter(Boolean).join(' / '), demand.job.work_postal_code].filter(Boolean).join(' · ')}</p>}
-                </address>
-                {maps?.map && (mapAllowed ? <iframe title="Mapa do local da operação" src={maps.map} loading="lazy" referrerPolicy="no-referrer" sandbox="allow-scripts" className="h-44 w-full rounded-xl border-0" /> : <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs leading-5 text-gray-500">Carregar o mapa conecta seu navegador ao OpenStreetMap.</p><Button onClick={() => setMapAllowed(true)} className="mt-2 px-3 text-xs">Carregar mapa</Button></div>)}
-                {maps?.route && <a href={maps.route} target="_blank" rel="noopener noreferrer" className="ec-button ec-button--secondary px-4 text-sm">Abrir rota ↗</a>}
-              </section>
-              <section aria-labelledby="notes-heading" className="space-y-2 border-t border-gray-100 pt-4">
-                <h3 id="notes-heading" className="text-sm font-semibold">Observações</h3>
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{demand.job.description?.trim() || 'Nenhuma observação adicionada.'}</p>
-              </section>
-              {!separateHistory && history}
+            <section aria-labelledby="summary-heading" className="ec-card ec-demand-detail__status min-w-0 space-y-4">
+              <h2 id="summary-heading" className="text-sm font-semibold text-gray-600">Status atual</h2>
+              <Badge role={summary?.available ? 'status' : 'alert'} tone={!summary?.available ? 'danger' : operationState === 'Finalizada' ? 'success' : operationState === 'Financeiro' || operationState === 'Encerramento' || operationState === 'Preparação' ? 'warning' : 'info'} className="ec-operation-status">{!summary?.available ? 'Estado operacional indisponível' : demand.cancelled ? 'Cancelada' : operationState}</Badge>
+              <p className="text-sm text-gray-600">Agenda: {demandDate(demand.job.job_date, now)} · {demand.job.start_time.slice(0, 5)} às {demand.job.end_time.slice(0, 5)}{demandWindow(demand.job).start.toDateString() !== demandWindow(demand.job).end.toDateString() ? ' (+1 dia)' : ''}</p>
+              <p className="text-sm text-gray-600">Quando agir: {now >= demandWindow(demand.job).end ? 'horário encerrado · conferir pendências agora' : 'conforme o início e término da agenda acima'}</p>
+              {!recruiting && !demand.completed && !demand.cancelled && <p className="text-sm text-gray-600">Recrutamento encerrado. As candidaturas existentes permanecem disponíveis conforme a elegibilidade.</p>}
+            </section>
+            <section aria-labelledby="operational-summary-heading" className="ec-card min-w-0 space-y-4">
+              <h2 id="operational-summary-heading" className="text-xl font-semibold">Resumo Operacional</h2>
+              {!summary?.available && <Toast tone="error"><p>{operationsError || 'Os dados operacionais estão incompletos ou inconsistentes. Os indicadores não estão disponíveis.'}</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="px-0 underline">Recarregar dados operacionais</Button></Toast>}
+              <dl className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+                {([
+                  ['Equipe Confirmada', summary?.confirmed],
+                  ['Presentes', summary?.present],
+                  ['Chegadas Pendentes', summary?.arrivalsPending],
+                  ['Ausências Confirmadas', summary?.absences],
+                  ['Check-outs Realizados', summary?.checkouts],
+                ] as const).map(([label, count]) => <div key={label} className="min-w-0">
+                  <dt className="break-words text-sm text-gray-600">{label}</dt>
+                  <dd className="text-2xl font-semibold">{summary?.available ? count : 'Indisponível'}</dd>
+                </div>)}
+              </dl>
+              <p className="text-xs leading-5 text-gray-500">Chegadas pendentes: sem check-in após a tolerância de 5 minutos. Ausência somente quando confirmada. O histórico de substituições permanece separado da equipe vigente.</p>
             </section>
             {actionError && <Toast tone="error">{actionError}</Toast>}
             {notice && <Toast tone="info">{notice}</Toast>}
+            <section aria-labelledby="pending-heading" className="ec-card space-y-3">
+              <h2 id="pending-heading" className="text-xl font-semibold">Ação Necessária</h2>
+              <p className="break-words text-lg font-semibold">Próxima ação: {continuation?.label}</p>
+              <p className="text-sm text-gray-600">{continuation?.description}</p>
+              <p className="text-sm"><span className="font-semibold">Responsável:</span> {continuation?.responsible}</p>
+              {continuation?.action && <Link href={continuation.action.href} className="ec-button ec-button--primary min-h-11 max-w-full whitespace-normal break-words px-4 text-sm"><span className="min-w-0 [overflow-wrap:anywhere]">{continuation.action.label}</span></Link>}
+            </section>
+            <section aria-labelledby="presence-heading" className="ec-card min-w-0 space-y-4">
+              <h2 id="presence-heading" className="text-xl font-semibold">Central de Presença</h2>
+              {summary?.available ? <div className="space-y-4">
+                {([
+                  ['present', 'Presentes'], ['late', 'Atrasados'], ['pending', 'Pendentes'],
+                  ['absent', 'Ausentes'], ['finished', 'Finalizados'], ['interrupted', 'Histórico de interrupções'],
+                ] as const).map(([presence, label]) => {
+                  const participants = summary.participants.filter((participant) => participant.presence === presence);
+                  return <section key={presence} aria-label={label} className="min-w-0 space-y-2 border-t border-gray-100 pt-3">
+                    <h3 className="text-sm font-semibold">{label} ({participants.length})</h3>
+                    {participants.length ? <ul className="space-y-2">{participants.map(({ assignment, late }) => <li key={`${assignment.job_id}:${assignment.worker_id}`} className="break-words text-sm text-gray-600">
+                      {personById.get(assignment.worker_id)?.name ?? 'Profissional'}
+                      {assignment.checkin_at && <> · Check-in: <time dateTime={assignment.checkin_at}>{new Date(assignment.checkin_at).toLocaleString('pt-BR')}</time>{late && ' · Chegou após a tolerância'}</>}
+                      {assignment.checkout_at && <> · Checkout: <time dateTime={assignment.checkout_at}>{new Date(assignment.checkout_at).toLocaleString('pt-BR')}</time></>}
+                    </li>)}</ul> : <p className="text-sm text-gray-500">Nenhum participante neste grupo.</p>}
+                  </section>;
+                })}
+              </div> : <p className="text-sm text-gray-600">Presença indisponível até a atualização dos vínculos operacionais.</p>}
+            </section>
+            <section aria-labelledby="continuation-heading" className="ec-card space-y-3">
+              <h2 id="continuation-heading" className="text-xl font-semibold">Próxima Etapa</h2>
+              <p className="text-sm text-gray-600">{continuation?.nextStep}</p>
+              <p className="text-sm">Siga a ação principal acima; as etapas de cada profissional permanecem disponíveis abaixo.</p>
+            </section>
+            {pendingReviews.length > 0 && operationState !== 'Finalizada' && <aside aria-label="Avaliações pendentes" className="ec-card space-y-2">
+              <p className="text-sm">Avaliação pendente do restaurante. As pendências operacionais prioritárias permanecem na ação principal.</p>
+              <Link href={`/reviews/${pendingReviews[0].job_id}`} className="inline-flex min-h-11 items-center text-sm font-semibold">Avaliar experiência</Link>
+            </aside>}
             <section aria-labelledby="operation-flow-heading" className="space-y-3">
               <h2 id="operation-flow-heading" className="scroll-mt-6 text-xl font-semibold">Fluxo operacional</h2>
               {operationsError && <Toast tone="error">{operationsError}</Toast>}
-              {hired.length ? hired.map((application) => {
+              {demand.cancelled ? <div className="ec-card ec-operation-flow space-y-4" aria-label="Fluxo operacional">
+                <Badge role="status" tone="neutral" className="ec-operation-status">Operação Cancelada</Badge>
+                <p className="text-sm text-gray-600">Encerrar acompanhamento. Consulte o histórico para revisar o motivo do cancelamento, sem reiniciar as etapas desta operação.</p>
+                <div className="flex flex-wrap gap-3">
+                  <a href="#timeline-heading" className="ec-button ec-button--secondary min-h-11 max-w-full whitespace-normal break-words px-4 text-sm">Consultar histórico</a>
+                  <a href="#timeline-heading" className="inline-flex min-h-11 items-center text-sm font-semibold text-orange-800">Revisar motivo</a>
+                </div>
+              </div> : hired.length ? hired.map((application) => {
                 const operation = operations.find((item) => item.job_id === application.job_id && item.worker_id === application.worker_id);
                 return <div key={application.job_id} className="space-y-2">
                   <p className="break-words text-sm font-semibold">{personById.get(application.worker_id)?.name ?? 'Profissional'}</p>
@@ -387,15 +418,13 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
                 </div>;
               }) : <OperationFlow jobId={demand.job.id} role="restaurant" hired={false} assignment={null}
                 startsAt={demandWindow(demand.job).start} endsAt={demandWindow(demand.job).end} now={now} />}
-              {nextAction.href !== `${base}?view=talents` && (!pendingOperation || pendingReviews.length > 0 || reserveActive) &&
-                <Link href={nextAction.href} className="ec-button ec-button--primary px-4 text-sm">{nextAction.label}</Link>}
             </section>
             <section id="team-heading" aria-labelledby="people-heading" className="scroll-mt-6 space-y-5 rounded-2xl border border-gray-200 bg-white p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 id="people-heading" className="text-xl font-semibold">{hired.length ? 'Profissional da Operação' : 'Candidatos'}</h2>
-                {!hired.length && recruiting && <Link href={`${base}?view=talents`} className="ec-button ec-button--primary px-4 text-sm">Convidar profissionais</Link>}
+                {!hired.length && recruiting && continuation?.action?.href !== `${base}?view=talents` && <Link href={`${base}?view=talents`} className="ec-button px-4 text-sm">Convidar profissionais</Link>}
               </div>
-              {peopleError && <Toast tone="info">{peopleError}</Toast>}
+              {peopleError && <Toast tone="danger">{peopleError}</Toast>}
               {!hired.length ? <section id="candidates-heading" aria-labelledby="people-heading" className="scroll-mt-6 space-y-3 border-t border-gray-100 pt-4">
                 <Link href={`${base}?view=candidates`} className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">Ver todos ({candidates.length})</Link>
                 {candidates.length ? candidates.slice(0, 3).map((candidate) => renderCandidate(candidate)) : <div className="rounded-xl bg-gray-50 p-4">
@@ -411,7 +440,7 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
                   const status = application.status === 'completed' ? 'Concluído' : checkout ? 'Checkout Realizado' : application.status === 'in_progress' ? now >= demandWindow(demand.job).end ? 'Trabalho encerrado' : 'Trabalho em andamento' : checkin ? 'Check-in Realizado' : 'Confirmado';
                   return <article key={application.worker_id} className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4">
                     {person ? <DemandPersonSummary person={person} role={demand.job.title} profileHref={`${base}?view=profile&person=${person.id}`} /> : <p className="text-sm text-gray-500">Profissional · perfil indisponível</p>}
-                    <p className="text-xs font-medium text-emerald-800">{status}{checkin && status !== 'Check-in Realizado' ? ' · Check-in Realizado' : ''}{checkout && status !== 'Checkout Realizado' ? ' · Checkout Realizado' : ''}</p>
+                    <Badge tone={application.status === 'completed' || checkout ? 'success' : application.status === 'in_progress' && now >= demandWindow(demand.job).end ? 'warning' : 'info'}>{status}{checkin && status !== 'Check-in Realizado' ? ' · Check-in Realizado' : ''}{checkout && status !== 'Checkout Realizado' ? ' · Checkout Realizado' : ''}</Badge>
                     <div className="flex flex-wrap gap-4">
                       <a href="#operation-flow-heading" className="inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">Ver etapa e ações</a>
                       {application.status === 'completed' && <Link href={`/reviews/${application.job_id}`} className="inline-flex min-h-11 items-center text-xs font-semibold">Avaliar profissional</Link>}
@@ -442,6 +471,29 @@ export default function DemandDetail({ demandId }: { demandId: string }) {
               <p className="text-xs leading-5 text-gray-500">O aceite do convite indica disponibilidade. A contratação exige confirmação explícita do restaurante antes do término da operação.</p>
             </section>}
             {separateHistory && history}
+            <section aria-labelledby="administrative-heading" className="ec-card space-y-5">
+              <h2 id="administrative-heading" className="text-lg font-semibold text-gray-700">Informações administrativas</h2>
+              <div className="text-sm">
+                <p className="text-xs text-gray-600">Valor da diária</p>
+                <p className="mt-1 tabular-nums text-gray-700">{Number(demand.job.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                <time dateTime={demand.job.job_date} className="mt-2 block text-xs text-gray-600">{demand.job.job_date.split('-').reverse().join('/')}</time>
+              </div>
+              <section aria-labelledby="location-heading" className="space-y-2 border-t border-gray-100 pt-4">
+                <h3 id="location-heading" className="scroll-mt-6 text-sm font-semibold">Local da Operação</h3>
+                <p className="break-words text-sm font-medium">{demand.job.location_name || 'Local a definir'}</p>
+                <address className="space-y-1 break-words text-sm leading-6 text-gray-600 not-italic">
+                  <p>{[demand.job.work_address, demand.job.work_number, demand.job.work_neighborhood].filter(Boolean).join(', ') || 'Endereço ainda não informado.'}</p>
+                  {(demand.job.work_city || demand.job.work_state || demand.job.work_postal_code) && <p>{[[demand.job.work_city, demand.job.work_state].filter(Boolean).join(' / '), demand.job.work_postal_code].filter(Boolean).join(' · ')}</p>}
+                </address>
+                {maps?.map && (mapAllowed ? <iframe title="Mapa do local da operação" src={maps.map} loading="lazy" referrerPolicy="no-referrer" sandbox="allow-scripts" className="h-44 w-full rounded-xl border-0" /> : <div className="rounded-xl bg-gray-50 p-3"><p className="text-xs leading-5 text-gray-500">Carregar o mapa conecta seu navegador ao OpenStreetMap.</p><Button onClick={() => setMapAllowed(true)} className="mt-2 px-3 text-xs">Carregar mapa</Button></div>)}
+                {maps?.route && <a href={maps.route} target="_blank" rel="noopener noreferrer" className="ec-button ec-button--secondary px-4 text-sm">Abrir rota ↗</a>}
+              </section>
+              <section aria-labelledby="notes-heading" className="space-y-2 border-t border-gray-100 pt-4">
+                <h3 id="notes-heading" className="text-sm font-semibold">Observações</h3>
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{demand.job.description?.trim() || 'Nenhuma observação adicionada.'}</p>
+              </section>
+              {!separateHistory && history}
+            </section>
           </>
         )}
       </section>

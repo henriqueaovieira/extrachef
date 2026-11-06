@@ -168,7 +168,9 @@ test('cards are accessible full-page links with the same operational structure a
   for (const quantity of [1, 2, 20, 50]) {
     const [demand] = build(Array.from({ length: quantity }, (_, i) => job(String(i))));
     const html = renderToStaticMarkup(React.createElement(components.default, { demand, onChanged() {} }));
-    for (const text of ['Equipe contratada', 'Candidatos', 'Ver Detalhes', 'Editar', 'Duplicar', 'Compartilhar', 'Cancelar', 'Centro de Eventos']) assert.ok(html.includes(text), text);
+    for (const text of ['Equipe contratada', 'Candidatos', 'Acompanhar etapas', 'Responsável:', 'Agenda da operação', 'Editar', 'Duplicar', 'Compartilhar', 'Cancelar', 'Centro de Eventos']) assert.ok(html.includes(text), text);
+    assert.ok(html.indexOf('ec-operation-status') < html.indexOf('Acompanhar etapas'));
+    assert.ok(html.indexOf('#people-heading') < html.indexOf('Agenda da operação'));
     assert.doesNotMatch(html, />Reserva</);
     assert.match(html, /href="\/restaurant\/demands\/demand"/);
     assert.doesNotMatch(html, /<table|<dialog|<canvas/);
@@ -176,6 +178,23 @@ test('cards are accessible full-page links with the same operational structure a
   }
 });
 
+test('demand status uses lifecycle semantics independently of staffing health', () => {
+  for (const [status, tone] of [
+    ['Buscando Profissionais', 'warning'], ['Recebendo Candidaturas', 'warning'],
+    ['Profissional Contratado', 'info'], ['Equipe Completa', 'info'], ['Em Andamento', 'info'],
+    ['Checkout Pendente', 'warning'], ['Não preenchida', 'warning'],
+    ['Concluída', 'success'], ['Cancelada', 'neutral'], ['Recrutamento encerrado', 'neutral'],
+  ]) {
+    const [base] = build([job('a')]);
+    const html = renderToStaticMarkup(React.createElement(components.default, {
+      demand: { ...base, status, health: 'risk' }, onChanged() {},
+    }));
+    assert.match(html, new RegExp(`ec-badge--${tone}[^>]*>${status}<`));
+    assert.match(html, /ec-badge--warning ec-operation-status/);
+    assert.match(html, /ec-demand-card__title/);
+    assert.match(html, /ec-button--primary/);
+  }
+});
 test('creation and details wire persistent RPCs and never mutate job columns directly', () => {
   const create = source('../app/restaurant/dashboard/jobs/create/page.tsx');
   assert.match(create, /rpc\('create_restaurant_demand'/);

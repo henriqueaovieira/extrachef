@@ -14,6 +14,7 @@ import { commonSpecialties } from '@/lib/specialties';
 import {
   classifyDemandTalents,
   demandStatusLabels,
+  matchesDemandFunction,
   rankSuggestions,
   relativeTime,
   stableSuggestions,
@@ -125,9 +126,14 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [approveTarget, setApproveTarget] = useState<Talent | null>(null);
+  const [hiredContext, setHiredContext] = useState<{ demandId: string; title: string; workerId: string; name: string; jobId: string | null } | null>(null);
   const [allHistory, setAllHistory] = useState<{ workerId: string; rows: TalentOperation[] } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [failedAction, setFailedAction] = useState<{ kind: 'directory' | 'invite' | 'hire' | 'connection'; talent?: Talent; demandId?: string; error?: string } | null>(null);
+  const error = failedAction?.error ?? '';
+  const setError = (message: string) => setFailedAction((action) => action
+    ? { ...action, error: message }
+    : message ? { kind: 'directory', error: message } : null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
   const [retry, setRetry] = useState(0);
@@ -138,15 +144,16 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   useEffect(() => {
     const refresh = () => setNow(new Date());
     const timer = window.setInterval(refresh, 1000);
-    window.addEventListener('focus', refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
-  }, []);
+    const reload = () => { refresh(); if (!loading && !busy) setRetry((value) => value + 1); };
+    const reloadTimer = window.setInterval(reload, 30_000);
+    window.addEventListener('focus', reload);
+    return () => { window.clearInterval(timer); window.clearInterval(reloadTimer); window.removeEventListener('focus', reload); };
+  }, [loading, busy]);
 
   useEffect(() => {
     let mounted = true;
     async function load() {
       setLoading(true);
-      setError('');
       try {
         const now = new Date();
         const demandData = await loadDemands(supabase);
@@ -176,15 +183,26 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         }
         const signed = await signDemandPhotos(supabase, rows);
         if (mounted) {
+          setFailedAction((action) => action?.kind === 'directory' ? null : action);
           setTalents(signed as Talent[]);
+          setSelected((person) => person ? (signed as Talent[]).find((row) => row.id === person.id) ?? person : null);
           setDemands(loadedDemands);
           setInvitations(invitationRows);
+          setHiredContext((context) => {
+            if (!context) return null;
+            const application = demandData.applications.find((row) => row.worker_id === context.workerId
+              && ['approved', 'in_progress', 'completed'].includes(row.status)
+              && demandData.jobs.some((job) => job.id === row.job_id && (job.demand_id || job.id) === context.demandId));
+            return application && application.job_id !== context.jobId ? { ...context, jobId: application.job_id } : context;
+          });
           setDemandId((current) => loadedDemands.some((demand) => demand.id === current)
             ? current
             : (loadedDemands.find((demand) => demand.hired < demand.required) ?? loadedDemands[0])?.id ?? '');
         }
       } catch (loadError) {
-        if (mounted) setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar os profissionais.');
+        if (mounted) {
+          setFailedAction({ kind: 'directory', error: loadError instanceof Error ? loadError.message : 'Não foi possível carregar os profissionais.' });
+        }
       } finally {
         if (mounted) setLoading(false);
       }
@@ -194,15 +212,8 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   }, [retry, supabase]);
 
   useEffect(() => {
-    if (!selected && !filtersOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (filtersOpen) setFiltersOpen(false);
-      else setSelected(null);
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [selected, filtersOpen]);
+    if (hiredContext && !approveTarget && !filtersOpen) document.getElementById('talent-hire-result')?.focus();
+  }, [hiredContext, approveTarget, filtersOpen, selected?.id]);
 
   const availableDemands = demands.filter((demand) => canHireDemand(demand, now));
   const current = availableDemands.find((demand) => demand.id === demandId) ?? null;
@@ -235,8 +246,8 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const visibleCandidates = candidatePeople.filter(matches);
   const visibleInterests = interestPeople.filter(matches);
 
-  const rankedEligible = current && recruiting && !full && !board.invited.size
-    ? rankSuggestions(talents.filter((talent) => !board.applicationByWorker.has(talent.id)), current.job.title).map((talent) => talent.id)
+  const rankedEligible = current && recruiting && !full
+    ? rankSuggestions(talents.filter((talent) => !board.applicationByWorker.has(talent.id) && !board.invited.has(talent.id)), current.job.title).map((talent) => talent.id)
     : [];
   const previousSuggestions = suggestionMemo[demandId] ?? [];
   const suggestionIds = stableSuggestions(previousSuggestions, rankedEligible);
@@ -244,6 +255,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     setSuggestionMemo((memo) => ({ ...memo, [current.id]: suggestionIds }));
   }
   const suggestions = suggestionIds.map((id) => talentById.get(id)).filter((talent): talent is Talent => Boolean(talent));
+  const visibleSuggestions = suggestions.filter(matches);
 
   const cities = [...new Set(talents.map(cityName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
   const specialties = [...new Set(talents.flatMap((talent) => talent.specialties ?? []))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
@@ -263,10 +275,10 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     setOnlyInterests(false);
   };
   const tabCounts: Record<TalentTab, number> = {
-    all: invitedPeople.length + candidatePeople.length,
-    candidates: candidatePeople.length,
-    invited: invitedPeople.length,
-    interests: interestPeople.length,
+    all: current ? visibleInvited.length + visibleCandidates.length + visibleSuggestions.length : 0,
+    candidates: current ? visibleCandidates.length : 0,
+    invited: current ? visibleInvited.length : 0,
+    interests: visibleInterests.length,
   };
 
   const setConnection = async (talent: Talent, category: 'favorite' | 'interest', enabled: boolean) => {
@@ -295,6 +307,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         ? enabled ? `${talent.name} foi marcado como favorito.` : `${talent.name} foi removido dos favoritos.`
         : enabled ? `Você está acompanhando ${talent.name}.` : `${talent.name} foi removido dos interesses.`);
     } catch (actionError) {
+      setFailedAction({ kind: 'connection', talent });
       setError(actionError instanceof Error ? actionError.message : 'Não foi possível atualizar o relacionamento.');
     } finally {
       setBusy('');
@@ -394,6 +407,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   };
 
   const invite = async (talent: Talent) => {
+    setFailedAction({ kind: 'invite', talent });
     if (!current || !canRecruitDemand(current, new Date())) {
       setError('O recrutamento desta operação foi encerrado.');
       return;
@@ -418,6 +432,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
 
   const approve = async () => {
     if (!approveTarget) return;
+    setFailedAction({ kind: 'hire', talent: approveTarget, demandId: current?.id ?? demandId });
     if (!current || !canHireDemand(current, new Date())) {
       setError('O horário de contratação desta operação foi encerrado.');
       return;
@@ -431,7 +446,8 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
         p_worker_id: approveTarget.id,
       });
       if (actionError) throw new Error(actionError.message);
-      setNotice(`${approveTarget.name} foi aprovado. O chat só fica disponível após esta confirmação.`);
+      setHiredContext({ demandId: current.id, title: current.job.title, workerId: approveTarget.id, name: approveTarget.name, jobId: null });
+      setNotice('');
       setApproveTarget(null);
       setRetry((value) => value + 1);
     } catch (actionError) {
@@ -444,6 +460,10 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const openProfile = (talent: Talent) => {
     setSelected(talent);
     setHistoryOpen(false);
+    setReviewExpanded(false);
+    setReviewError('');
+    setHistoryError('');
+    setError('');
   };
 
   const renderCard = (talent: Talent, status: DemandTalentStatus | null) => {
@@ -453,12 +473,12 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
     const lastHire = relativeTime(talent.last_hired_at);
     const relationship = relationshipAction(talent);
     const canApprove = Boolean(current && canHireDemand(current, now)) && !full && (status === 'candidate' || status === 'accepted');
+    const recommended = status === null && suggestionIds.includes(talent.id);
     const statusText = status === 'candidate'
-      ? full ? 'Vaga preenchida' : null
-      : status === 'awaiting' || status === 'accepted'
-        ? full ? 'Equipe já definida' : demandStatusLabels[status]
-        : status ? demandStatusLabels[status] : null;
-    return <article key={talent.id} className={`ec-card flex min-w-0 flex-col gap-3 p-4 sm:p-5 ${status === 'unavailable' ? 'opacity-60' : ''}`}>
+      ? full ? 'Equipe já definida' : 'Aguardando aprovação · Pode ser contratado'
+      : status ? demandStatusLabels[status] : recommended ? 'Recomendado para esta operação' : 'Perfil para avaliação';
+    return <article key={talent.id} className="ec-card flex min-w-0 flex-col gap-3 p-4 sm:p-5">
+      <div><Badge tone={status === 'approved' ? 'success' : status === 'candidate' || status === 'accepted' ? 'warning' : status === 'unavailable' ? 'neutral' : 'info'}>{statusText}</Badge></div>
       <div className="flex min-w-0 items-start gap-3">
         <PersonPhoto talent={talent} onClick={() => openProfile(talent)} />
         <div className="min-w-0 flex-1">
@@ -467,54 +487,94 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
           <p className="mt-1.5 break-words text-xs text-gray-500">{cityName(talent) || 'Cidade não compartilhada'}</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 rounded-xl bg-gray-50 p-3">
+      <div className="space-y-2 text-xs text-gray-700">
+        {talent.completed_operations > 0
+          ? <Badge tone="success">Trabalhou com você {talent.completed_operations} {talent.completed_operations === 1 ? 'vez' : 'vezes'}</Badge>
+          : <p>Sem operações concluídas com você.</p>}
+        {talent.completed_operations > 0 && lastHire && <p>Última contratação: {lastHire}</p>}
+        {isFavorite && <Badge>Favorito</Badge>}
+        {isInterest && <Badge>Interesse marcado por você</Badge>}
+      </div>
+      {recommended && <div className="flex flex-wrap gap-2 text-xs">
+        {current && matchesDemandFunction(talent.specialties, current.job.title) && <Badge tone="info">Compatível com a função</Badge>}
+        {isFavorite && <span>Marcado como favorito por você.</span>}
+        {score != null && <span>Avaliação compartilhada: {Number(score).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} / 5.</span>}
+        {talent.completed_operations === 0 && !isFavorite && !(current && matchesDemandFunction(talent.specialties, current.job.title))
+          && score == null && <span>Sem histórico com você ou avaliação compartilhada; confira o perfil antes de convidar.</span>}
+      </div>}
+      <div className="rounded-xl bg-gray-50 p-3">
         <div><p className="text-sm font-semibold text-gray-900"><span aria-hidden="true" className="text-amber-500">★</span> {score === null || score === undefined ? '—' : `${Number(score).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} / 5`}</p><p className="mt-1 text-xs text-gray-500">{score === null || score === undefined ? 'Sem avaliação compartilhada' : 'Avaliação média'}</p></div>
-        <div><p className="text-sm font-semibold text-gray-900">{talent.reputation?.completed ?? 0}</p><p className="mt-1 text-xs text-gray-500">{(talent.reputation?.completed ?? 0) === 1 ? 'Operação concluída' : 'Operações concluídas'}</p></div>
+        <p className="mt-1 text-xs text-gray-600">{talent.review_count === null ? 'Avaliações privadas' : `${talent.review_count} avaliações compartilhadas`}</p>
       </div>
       <p className="line-clamp-2 break-words text-sm leading-6 text-gray-600">{talent.experience?.trim() || 'Experiência não compartilhada.'}</p>
-      {(isFavorite || isInterest || talent.completed_operations > 0) && <div className="flex flex-wrap gap-2 text-xs text-gray-700">
-        {isFavorite && <Badge>❤️ Favorito</Badge>}
-        {isInterest && <Badge>👀 Interesse</Badge>}
-        {talent.completed_operations > 0 && <Badge tone="success">✅ Trabalhou com você {talent.completed_operations} {talent.completed_operations === 1 ? 'vez' : 'vezes'}</Badge>}
-        {talent.completed_operations > 0 && lastHire && <p className="w-full text-gray-500">Última contratação: {lastHire}</p>}
-      </div>}
-      {statusText && <div><Badge tone={status === 'approved' ? 'success' : status === 'unavailable' ? 'neutral' : 'warning'}>{statusText}</Badge></div>}
+      <p className="text-xs text-gray-600">{talent.reputation ? `${talent.reputation.completed} operações concluídas` : 'Operações: sem dados compartilhados'}</p>
+      {!talent.reputation && score == null && <Badge tone="warning">Dados insuficientes</Badge>}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           <Button variant="ghost" onClick={() => openProfile(talent)} className="px-2 text-xs">Ver perfil</Button>
           <Button variant="ghost" aria-label={relationship.aria} disabled={busy !== ''} onClick={relationship.run} className="px-2 text-xs">{relationship.label}</Button>
         </div>
-        {canApprove && <Button variant="primary" onClick={() => setApproveTarget(talent)} className="px-4 text-xs">Aprovar</Button>}
+        {status === 'accepted' && canApprove && <Button variant="secondary" onClick={() => openProfile(talent)} className="px-4 text-xs">Avaliar candidatura</Button>}
+        {canApprove && <Button variant="primary" onClick={() => { setError(''); setApproveTarget(talent); }} className="px-4 text-xs">Confirmar contratação</Button>}
+        {status === 'awaiting' && <p className="text-xs text-gray-600">Aguardando resposta</p>}
+        {status === 'approved' && current && <Link href={`/restaurant/demands/${current.id}`} className="ec-button px-3 text-xs">Abrir operação</Link>}
+        {!status && recruiting && !full && !board.applicationByWorker.has(talent.id)
+          && <Button variant="primary" busy={busy === talent.id} disabled={busy !== ''} onClick={() => void invite(talent)} className="px-3 text-xs">Convidar para operação</Button>}
       </div>
     </article>;
   };
 
   const cardGrid = (people: Talent[]) => <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">{people.map((talent) => renderCard(talent, statusOf(talent)))}</div>;
-  const filteredOut = <p className="text-sm text-gray-500">Nenhum profissional corresponde à busca ou aos filtros.</p>;
+  const filteredOut = <EmptyState title="Nenhum profissional encontrado para os critérios atuais." description="Revise a busca, função, cidade ou relacionamento." action={<Button onClick={clearFilters}>Limpar filtros</Button>} />;
 
   const invitedSection = <section aria-labelledby="invited-heading" className="space-y-3">
-    <SectionHeading id="invited-heading" count={invitedPeople.length}>Convidados</SectionHeading>
+    <SectionHeading id="invited-heading" count={visibleInvited.length}>Convidados</SectionHeading>
     {visibleInvited.length ? cardGrid(visibleInvited)
       : invitedPeople.length ? filteredOut
-        : suggestions.length ? <div className="space-y-3">
-          <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Seu próximo profissional pode estar aqui</p><p className="mt-1 text-sm leading-6 text-gray-600">Ainda não há convidados nesta operação. Explore os perfis recomendados e envie um convite pelo perfil.</p></div>
-          <h3 className="text-sm font-semibold text-gray-900">Talentos recomendados</h3>
-          <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">{suggestions.map((talent) => renderCard(talent, null))}</div>
-        </div>
-          : <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Nenhum convite por enquanto</p><p className="mt-1 text-sm leading-6 text-gray-600">Os convites e suas respostas aparecerão aqui. Você também pode acompanhar as candidaturas desta operação.</p></div>}
+        : <EmptyState title="Nenhum convite enviado." description="Explore a rede e envie um convite para esta operação." action={<Link className="ec-button px-3" href={`/restaurant/demands/${current?.id}?view=talents`}>Convidar profissionais</Link>} />}
   </section>;
 
   const candidateSection = <section aria-labelledby="candidates-heading" className="space-y-3">
-    <SectionHeading id="candidates-heading" count={candidatePeople.length}>Candidatos</SectionHeading>
+    <SectionHeading id="candidates-heading" count={visibleCandidates.length}>Candidatos</SectionHeading>
     {visibleCandidates.length ? cardGrid(visibleCandidates)
       : candidatePeople.length ? filteredOut
-        : <div className="rounded-xl border border-dashed border-gray-200 bg-white p-4"><p className="text-sm font-semibold text-gray-900">Aguardando os primeiros candidatos</p><p className="mt-1 text-sm leading-6 text-gray-600">Quando um profissional se candidatar, seu perfil aparecerá aqui para você analisar.</p><Link href={`/restaurant/demands/${current?.id}`} className="mt-2 inline-flex min-h-11 items-center text-xs font-semibold text-orange-800">Ver operação</Link></div>}
+        : <EmptyState title="Ainda não existem candidatos para esta operação." description="Convide profissionais da rede enquanto aguarda candidaturas." action={<Link className="ec-button px-3" href={`/restaurant/demands/${current?.id}?view=talents`}>Explorar talentos</Link>} />}
   </section>;
 
-  const noDemand = <EmptyState title="Nenhuma operação ativa." description="Talentos é organizado pela operação atual. Crie uma operação para receber candidaturas e convidar profissionais."
-    action={<Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary px-4">Criar operação</Link>} />;
+  const recommendationSection = <section aria-labelledby="recommendations-heading" className="space-y-3">
+    <SectionHeading id="recommendations-heading" count={visibleSuggestions.length}>Recomendações</SectionHeading>
+    {visibleSuggestions.length ? cardGrid(visibleSuggestions) : suggestions.length ? filteredOut
+      : <EmptyState title="Nenhuma recomendação disponível neste momento." description="A rede completa continua acessível no contexto desta operação." action={<Link className="ec-button px-3" href={`/restaurant/demands/${current?.id}?view=talents`}>Explorar rede completa</Link>} />}
+  </section>;
+  const noDemand = <EmptyState title="Selecione uma operação para visualizar talentos." description="A central mostra operações elegíveis para recrutamento. Operações já contratadas continuam em Operações e Equipe."
+    action={<Link href="/restaurant/demands" className="ec-button ec-button--primary px-4">Escolher operação</Link>} />;
+  const hireResult = hiredContext && <section id="talent-hire-result" tabIndex={-1} aria-labelledby="talent-hire-heading" className="ec-card space-y-3 border-emerald-200 bg-emerald-50 p-4">
+    <h2 id="talent-hire-heading" className="font-semibold">Contratação concluída</h2>
+    <p role="status" className="break-words text-sm">{hiredContext.name} · {hiredContext.title}</p>
+    <div className="flex flex-wrap gap-2">
+      <Link href="/restaurant/team" className="ec-button px-3 text-sm">Ir para Equipe</Link>
+      <Link href={`/restaurant/demands/${hiredContext.demandId}`} className="ec-button px-3 text-sm">Abrir operação</Link>
+      {hiredContext.jobId ? <Link href={`/chat/${hiredContext.jobId}`} className="ec-button px-3 text-sm">Abrir chat</Link>
+        : <Button onClick={() => setRetry((value) => value + 1)}>Atualizar acesso ao chat</Button>}
+    </div>
+  </section>;
 
   const selectedStatus = selected ? statusOf(selected) : null;
+  const errorFeedback = error && <Toast tone="error" title={failedAction?.kind === 'directory' ? 'Não foi possível carregar os talentos.'
+    : failedAction?.kind === 'invite' ? 'Não foi possível enviar o convite.'
+      : failedAction?.kind === 'hire' ? 'Não foi possível concluir a contratação.' : 'Não foi possível atualizar o relacionamento.'}>
+    <p>{error}</p>
+    <Button variant="ghost" onClick={() => {
+      if (failedAction?.kind === 'hire' && approveTarget) void approve();
+      else if (failedAction?.kind === 'hire' && failedAction.talent && failedAction.demandId) {
+        setDemandId(failedAction.demandId);
+        setApproveTarget(failedAction.talent);
+        setError('');
+      }
+      else if (failedAction?.kind === 'invite' && failedAction.talent) void invite(failedAction.talent);
+      else { setError(''); setRetry((value) => value + 1); }
+    }} disabled={busy !== ''} className="px-0 underline">Tentar novamente</Button>
+  </Toast>;
   const location = selected ? cityName(selected) : '';
   const average = selected ? rating(selected) : null;
   const punctuality = selected?.reputation?.punctuality ?? null;
@@ -523,7 +583,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
   const selectedRelationship = selected ? relationshipAction(selected) : null;
 
   return (
-    <main className="min-h-screen bg-[#fafaf9] px-4 py-5 pb-28 text-gray-950 sm:px-8 sm:py-7">
+    <main className="ec-talents min-h-screen bg-[#fafaf9] px-4 py-5 pb-28 text-gray-950 sm:px-8 sm:py-7">
       <section className="mx-auto max-w-7xl space-y-4">
         <header className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -537,7 +597,7 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
             <div className="min-w-0 flex-1"><p className="text-xs font-semibold uppercase tracking-widest text-orange-800">Operação selecionada</p><h2 className="mt-1 break-words text-xl font-semibold">{current?.job.title}</h2></div>
             <label className="block min-w-0 w-full text-xs font-semibold text-gray-500 sm:w-auto">
             <span className="sr-only">Operação</span>
-            <Select value={demandId} onChange={(event) => {
+            <Select id="talent-operation" value={demandId} onChange={(event) => {
               setDemandId(event.target.value);
               const url = new URL(window.location.href);
               url.searchParams.set('demand', event.target.value);
@@ -571,10 +631,19 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div role="tablist" aria-label="Talentos da operação" className="flex min-w-0 flex-wrap gap-2">
-            {tabs.map((item) => <Button key={item.id} type="button" role="tab" aria-selected={tab === item.id} variant="ghost"
+            {tabs.map((item, index) => <Button key={item.id} id={`talent-tab-${item.id}`} type="button" role="tab" aria-selected={tab === item.id}
+              aria-controls="talent-results" tabIndex={tab === item.id ? 0 : -1} variant="ghost"
+              onKeyDown={(event) => {
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+                  : event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : null;
+                if (next === null) return;
+                event.preventDefault();
+                setTab(tabs[next].id);
+                document.getElementById(`talent-tab-${tabs[next].id}`)?.focus();
+              }}
               onClick={() => setTab(item.id)}
               className={`shrink-0 rounded-full border px-3 py-2 text-sm font-semibold ${tab === item.id ? 'border-orange-200 bg-orange-50 text-orange-800' : 'border-gray-200 bg-white text-gray-600 hover:text-gray-900'}`}>
-                {item.label} <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold ${tab === item.id ? 'bg-orange-100 text-orange-900' : 'bg-gray-100 text-gray-600'}`}>{loading ? '—' : tabCounts[item.id]}</span>
+                {item.label} <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold ${tab === item.id ? 'bg-orange-100 text-orange-900' : 'bg-gray-100 text-gray-600'}`}>{loading && !talents.length ? '—' : tabCounts[item.id]}</span>
             </Button>)}
           </div>
           <Button variant="ghost" aria-haspopup="dialog" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}
@@ -583,10 +652,12 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
           </Button>
         </div>
 
-        {error && <Toast tone="error" title="Não foi possível concluir a ação."><p>{error}</p><Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="px-0 underline">Atualizar lista</Button></Toast>}
-        {notice && <Toast tone="info" onDismiss={() => setNotice('')}>{notice}</Toast>}
+        {!selected && !approveTarget && !filtersOpen && errorFeedback}
+        {!selected && notice && <Toast tone="info" onDismiss={() => setNotice('')}>{notice}</Toast>}
+        {!selected && hireResult}
 
-        {loading ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((item) => <LoadingSkeleton key={item} label="Carregando talentos..." />)}</div>
+        <div id="talent-results" role="tabpanel" aria-labelledby={`talent-tab-${tab}`} tabIndex={0} aria-busy={loading}>
+        {loading && !talents.length ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((item) => <LoadingSkeleton key={item} label="Carregando talentos..." />)}</div>
           : error && !talents.length ? null
             : tab === 'interests'
               ? visibleInterests.length ? cardGrid(visibleInterests)
@@ -594,23 +665,28 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
                   : <EmptyState icon="👀" title="Nenhum profissional marcado como interesse." description="Marque 👀 Interesse nos profissionais que você quer acompanhar." />
               : !current ? noDemand
                 : <div className="space-y-4">
-                  {full && <div role="status" className="ec-card border-emerald-200 bg-emerald-50 p-4">
-                    <p className="font-semibold text-emerald-900">✅ Equipe completa</p>
-                    <p className="mt-1 text-sm text-emerald-900/80">Todas as vagas desta operação já foram preenchidas.</p>
+                  {full && <div role="status" className="ec-card border-blue-200 bg-blue-50 p-4">
+                    <p className="font-semibold text-blue-900">Equipe completa</p>
+                    <p className="mt-1 text-sm text-blue-900">Todas as vagas desta operação já foram preenchidas.</p>
                   </div>}
                   {tab !== 'candidates' && invitedSection}
                   {tab !== 'invited' && candidateSection}
+                  {tab === 'all' && recommendationSection}
                 </div>}
+        </div>
       </section>
 
-      {filtersOpen && <div className="fixed inset-0 z-50 bg-gray-950/40" onMouseDown={(event) => { if (event.target === event.currentTarget) setFiltersOpen(false); }}>
-        <aside role="dialog" aria-modal="true" aria-labelledby="talent-filters-heading"
+      {filtersOpen && <dialog ref={(node) => { if (node && !node.open) node.showModal(); }} aria-modal="true" aria-labelledby="talent-filters-heading"
+        onCancel={() => setFiltersOpen(false)} className="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none bg-transparent p-0 text-gray-950"
+        onClick={(event) => { if (event.target === event.currentTarget) setFiltersOpen(false); }}>
+        <div
           className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-3xl bg-white shadow-2xl md:inset-y-0 md:left-auto md:right-0 md:max-h-none md:w-96 md:rounded-none">
           <div className="flex min-h-14 items-center justify-between border-b border-gray-200 px-5">
             <h2 id="talent-filters-heading" className="text-sm font-semibold">Filtros</h2>
-            <Button variant="ghost" aria-label="Fechar filtros" onClick={() => setFiltersOpen(false)} className="px-3 text-xl">×</Button>
+            <Button autoFocus variant="ghost" aria-label="Fechar filtros" onClick={() => setFiltersOpen(false)} className="px-3 text-xl">×</Button>
           </div>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+            {errorFeedback}
             <div>
               <label className="mb-1 block text-sm font-medium" htmlFor="talent-specialty">Função</label>
               <Select id="talent-specialty" value={specialty} onChange={(event) => setSpecialty(event.target.value)}>
@@ -633,98 +709,102 @@ export default function TalentCenter({ initialDemandId = null }: { initialDemand
               <TextInput type="checkbox" checked={checked} onChange={(event) => update(event.target.checked)} className="size-5 accent-orange-700" />
             </label>)}
           </div>
-          <div className="flex gap-2 border-t border-gray-200 p-4">
-            <Button onClick={clearFilters} className="flex-1 px-3">Limpar filtros</Button>
-            <Button variant="primary" onClick={() => setFiltersOpen(false)} className="flex-1 px-3">Ver profissionais</Button>
+          <div className="flex flex-wrap gap-2 border-t border-gray-200 p-4">
+            <Button onClick={clearFilters} className="min-w-0 flex-1 basis-32 px-3">Limpar filtros</Button>
+            <Button variant="primary" onClick={() => setFiltersOpen(false)} className="min-w-0 flex-1 basis-32 px-3">Ver profissionais</Button>
           </div>
-        </aside>
-      </div>}
+        </div>
+      </dialog>}
 
-      {selected && <div className="fixed inset-0 z-50 bg-gray-950/40" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
-        <aside role="dialog" aria-modal="true" aria-labelledby="talent-profile-heading"
-          className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col overflow-hidden bg-white shadow-2xl md:w-[min(40vw,42rem)]">
+      {selected && <dialog ref={(node) => { if (node && !node.open) node.showModal(); }} aria-modal="true" aria-labelledby="talent-profile-heading"
+        onCancel={() => setSelected(null)} className="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none bg-transparent p-0 text-gray-950"
+        onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+        <div className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col overflow-y-auto bg-white shadow-2xl">
           <div className="flex min-h-14 items-center justify-between border-b border-gray-200 px-5">
             <h2 id="talent-profile-heading" className="text-sm font-semibold">Perfil do Profissional</h2>
-            <Button variant="ghost" aria-label="Fechar perfil" onClick={() => setSelected(null)} className="px-3 text-xl">×</Button>
+            <Button autoFocus variant="ghost" aria-label="Fechar perfil" onClick={() => setSelected(null)} className="px-3 text-xl">×</Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="relative flex h-52 items-end bg-gradient-to-br from-orange-100 to-stone-200 p-5 sm:h-60">
-              {selected.photoUrl && <Image src={selected.photoUrl} alt="" fill unoptimized sizes="(min-width: 768px) 40vw, 100vw" className="object-cover" />}
-              <div className="absolute inset-0 bg-gradient-to-t from-gray-950/65 via-transparent to-transparent" />
-              <div className="relative flex w-full items-end justify-between gap-3 text-white">
-                <div className="flex min-w-0 items-end gap-3">
+            <div className="bg-orange-50 p-5">
+              <div className="flex w-full flex-wrap items-start gap-3 text-gray-950">
+                <div className="flex min-w-0 flex-wrap items-start gap-3">
                   <PersonPhoto talent={selected} large onClick={() => {}} />
-                  <div className="min-w-0 pb-1"><h3 className="flex items-center text-xl font-semibold"><span className="truncate">{selected.name}</span><ProfessionalVerification userId={selected.id} /></h3><p className="text-sm text-white/90">{selected.specialties?.[0] || 'Profissional'}</p></div>
+                  <div className="min-w-0 flex-1 basis-40"><h3 className="flex items-center text-xl font-semibold"><span className="min-w-0 break-words">{selected.name}</span><ProfessionalVerification userId={selected.id} /></h3><p className="break-words text-sm text-gray-700">{selected.specialties?.[0] || 'Profissional'}</p></div>
                 </div>
-                <span className="pb-1 text-xs">{location || 'Cidade não compartilhada'}</span>
+                <span className="w-full break-words text-xs text-gray-700">{location || 'Cidade não compartilhada'}</span>
               </div>
             </div>
             <div className="space-y-6 p-5">
+              {!approveTarget && errorFeedback}
+              {notice && <Toast tone="info" onDismiss={() => setNotice('')}>{notice}</Toast>}
+              {hireResult}
               {(selected.categories.includes('favorite') || selected.categories.includes('interest')) && <div className="flex flex-wrap gap-2">
                 {selected.categories.includes('favorite') && <Badge>❤️ Favorito</Badge>}
                 {selected.categories.includes('interest') && <Badge>👀 Interesse</Badge>}
               </div>}
-              <section aria-label="Métricas" className="grid grid-cols-2 gap-3 rounded-2xl border border-gray-200 p-4 sm:grid-cols-4">
-                <div><p className="font-semibold"><span className="text-amber-500">★</span> {average === null || average === undefined ? '—' : Number(average).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</p><p className="mt-1 text-[11px] text-gray-500">{selected.review_count === null ? 'avaliações privadas' : `${selected.review_count} avaliações`}</p></div>
-                <div><p className="font-semibold">{selected.reputation?.completed ?? '—'}</p><p className="mt-1 text-[11px] text-gray-500">operações concluídas</p></div>
-                <div><p className="font-semibold">{percentage(punctuality)}</p><p className="mt-1 text-[11px] text-gray-500">pontualidade</p></div>
-                <div><p className="font-semibold">{attendance === null ? '—' : percentage(attendance)}</p><p className="mt-1 text-[11px] text-gray-500">comparecimento</p></div>
-              </section>
-
-              <section><h3 className="text-sm font-semibold">Sobre mim</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{selected.bio || 'Descrição profissional não compartilhada.'}</p></section>
-
-              <section><h3 className="text-sm font-semibold">Especialidades</h3><div className="mt-2 flex flex-wrap gap-2">{(selected.specialties ?? []).length ? selected.specialties?.map((item) => <span key={item} className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-700">{item}</span>) : <p className="text-sm text-gray-500">Especialidades não compartilhadas.</p>}</div></section>
-
-              <section><h3 className="text-sm font-semibold">Experiência</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-600">{selected.experience || 'Experiência não compartilhada.'}</p></section>
-
               {selected.restaurant_operations > 0 && <section className="rounded-2xl bg-emerald-50 p-4">
                 <p className="text-sm font-semibold">✅ Você já contratou este profissional {selected.restaurant_operations} {selected.restaurant_operations === 1 ? 'vez' : 'vezes'}.</p>
                 <p className="mt-1 text-xs text-gray-600">Última contratação: {relativeTime(selected.last_hired_at) ?? '—'}</p>
                 <Button variant="secondary" disabled={historyLoading} onClick={() => void toggleHistory()} className="mt-3 px-3 text-xs">{historyLoading ? 'Carregando...' : historyOpen && allHistory?.workerId === selected.id ? 'Ocultar histórico' : 'Ver histórico de operações'}</Button>
-                {historyError && <p role="alert" className="mt-2 text-xs text-red-700">{historyError}</p>}
+                {historyError && <Toast tone="warning" title="Não foi possível carregar o histórico."><p>{historyError}</p><Button onClick={() => void toggleHistory()}>Recarregar histórico</Button></Toast>}
                 {historyOpen && <ul className="mt-3 space-y-2 border-t border-emerald-200 pt-3">
                   {(allHistory?.workerId === selected.id ? allHistory.rows : selected.history).map((operation, index) => <li key={`${operation.job_date}-${index}`} className="text-xs text-gray-700"><b>{operation.title}</b> · {formatDate(operation.job_date)} · {operation.status}</li>)}
                 </ul>}
               </section>}
+              {selected.restaurant_operations === 0 && <p className="text-sm text-gray-600">Sem contratações anteriores com você.</p>}
 
               <section>
-                <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold">Avaliações de restaurantes</h3>
+                <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Avaliações de restaurantes</h3>
                   {selected.review_count !== null && selected.review_count > 0 && <Button variant="ghost" disabled={reviewLoading} onClick={() => void toggleReviews()} className="min-h-9 px-2 text-xs text-orange-700">{reviewLoading ? 'Carregando...' : reviewExpanded && allReviews?.workerId === selected.id ? 'Ocultar avaliações' : `Ver todas avaliações (${selected.review_count})`}</Button>}
                   {selected.review_count === null && <span className="text-xs text-gray-500">Privadas</span>}
                 </div>
-                {reviewError && <p role="alert" className="mt-2 text-xs text-red-700">{reviewError}</p>}
+                <p className="mt-2 text-sm text-gray-700">Avaliação média: {average == null ? 'Sem dados compartilhados' : `${Number(average).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} / 5`}</p>
+                {reviewError && <Toast tone="warning" title="Não foi possível carregar as avaliações."><p>{reviewError}</p><Button onClick={() => void toggleReviews()}>Recarregar avaliações</Button></Toast>}
                 <div className="mt-3 space-y-3">
                   {(reviewExpanded && allReviews?.workerId === selected.id ? allReviews.rows : selected.reviews).map((review, index) => <article key={`${review.created_at}-${index}`} className="rounded-xl border border-gray-100 p-3">
-                    <div className="flex justify-between gap-2 text-xs"><b>{review.restaurant_name}</b><span className="shrink-0"><span className="text-amber-500">★</span> {review.rating} · {formatDate(review.created_at)}</span></div>
+                    <div className="flex flex-wrap justify-between gap-2 text-xs"><b className="min-w-0 break-words">{review.restaurant_name}</b><span><span className="text-amber-500">★</span> {review.rating} · {formatDate(review.created_at)}</span></div>
                     <p className="mt-2 text-xs leading-5 text-gray-600">{review.comment || 'Sem comentário.'}</p>
                   </article>)}
-                  {!selected.reviews.length && <p className="text-sm text-gray-500">Nenhuma avaliação compartilhada.</p>}
+                  {!selected.reviews.length && <p className="text-sm text-gray-500">{selected.review_count === null ? 'Histórico de avaliações privado.' : 'Nenhuma avaliação compartilhada.'}</p>}
                 </div>
               </section>
+              <section><h3 className="text-sm font-semibold">Experiência</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{selected.experience || 'Experiência não compartilhada.'}</p></section>
+              <section aria-label="Operações" className="grid grid-cols-2 gap-3 rounded-2xl border border-gray-200 p-4">
+                <div><p className="font-semibold">{selected.reputation?.completed ?? '—'}</p><p className="mt-1 break-words text-xs text-gray-600">{selected.reputation ? 'operações concluídas' : 'Sem dados compartilhados'}</p></div>
+                <div><p className="font-semibold">{percentage(punctuality)}</p><p className="mt-1 break-words text-xs text-gray-600">pontualidade</p></div>
+                <div><p className="font-semibold">{attendance === null ? '—' : percentage(attendance)}</p><p className="mt-1 break-words text-xs text-gray-600">comparecimento</p></div>
+              </section>
+              {!selected.reputation && average == null && <Badge tone="warning">Dados insuficientes</Badge>}
+              <section><h3 className="text-sm font-semibold">Sobre mim</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{selected.bio || 'Descrição profissional não compartilhada.'}</p></section>
+              <section><h3 className="text-sm font-semibold">Especialidades</h3><div className="mt-2 flex flex-wrap gap-2">{(selected.specialties ?? []).length ? selected.specialties?.map((item) => <span key={item} className="max-w-full break-words rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-700">{item}</span>) : <p className="text-sm text-gray-500">Especialidades não compartilhadas.</p>}</div></section>
             </div>
           </div>
-          <div className="space-y-2 border-t border-gray-200 p-4">
+          <div className="shrink-0 space-y-2 border-t border-gray-200 p-4">
             {current && full && <p role="status" className="text-sm text-gray-700"><b>Equipe já formada.</b> Esta operação não está mais recebendo novas contratações.</p>}
-            {current && !full && selectedStatus && selectedStatus !== 'candidate' && <p role="status" className="text-sm font-semibold text-gray-700">{demandStatusLabels[selectedStatus]}</p>}
-            {!current && <p className="text-sm text-gray-600">Crie uma operação para convidar este profissional.</p>}
-            <div className="flex gap-2">
-              {selectedRelationship && <Button variant="secondary" aria-label={selectedRelationship.aria} onClick={selectedRelationship.run} disabled={busy !== ''} className="flex-1 px-3">{selectedRelationship.label}</Button>}
+            {current && !full && selectedStatus && <p role="status" className="text-sm font-semibold text-gray-700">{selectedStatus === 'candidate' ? 'Aguardando aprovação · Pode ser contratado' : demandStatusLabels[selectedStatus]}</p>}
+            {!current && <p className="text-sm text-gray-600">{hiredContext?.workerId === selected.id
+              ? 'Contratação confirmada. Acompanhe pelas ações de continuidade acima.'
+              : 'Selecione uma operação elegível para convidar este profissional.'}</p>}
+            <div className="flex flex-wrap gap-2">
+              {selectedRelationship && <Button variant="secondary" aria-label={selectedRelationship.aria} onClick={selectedRelationship.run} disabled={busy !== ''} className="min-w-0 flex-1 basis-32 px-3">{selectedRelationship.label}</Button>}
               {current && !full && (selectedStatus === 'candidate' || selectedStatus === 'accepted')
-                && <Button variant="primary" onClick={() => setApproveTarget(selected)} className="flex-1 px-3">Aprovar candidato</Button>}
+                && <Button variant="primary" onClick={() => { setError(''); setApproveTarget(selected); }} className="min-w-0 flex-1 basis-32 px-3">Confirmar contratação</Button>}
               {current && recruiting && !full && !selectedStatus && !board.applicationByWorker.has(selected.id)
-                && <Button variant="primary" busy={busy === selected.id} disabled={busy !== ''} onClick={() => void invite(selected)} className="flex-1 px-3">Convidar para {current.job.title}</Button>}
+                && <Button variant="primary" busy={busy === selected.id} disabled={busy !== ''} onClick={() => void invite(selected)} className="min-w-0 flex-1 basis-32 px-3">Convidar para operação</Button>}
+              {selectedStatus === 'approved' && current && <Link href={`/restaurant/demands/${current.id}`} className="ec-button px-3">Abrir operação</Link>}
             </div>
           </div>
-        </aside>
-      </div>}
+        </div>
+      </dialog>}
 
-      {approveTarget && <div className="fixed inset-0 z-[60] grid place-items-center bg-gray-950/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setApproveTarget(null); }}>
-        <section role="dialog" aria-modal="true" aria-labelledby="approve-heading" className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-3"><div><h2 id="approve-heading" className="font-semibold">Confirmar contratação</h2><p className="mt-1 text-sm text-gray-600">Aprovar {approveTarget.name}<ProfessionalVerification userId={approveTarget.id} /> confirma a contratação. O chat será liberado após a confirmação.</p></div><Button variant="ghost" aria-label="Fechar" onClick={() => setApproveTarget(null)} className="px-2 text-xl">×</Button></div>
+      {approveTarget && <dialog ref={(node) => { if (node && !node.open) node.showModal(); }} aria-modal="true" aria-labelledby="approve-heading"
+        onCancel={(event) => { if (busy) event.preventDefault(); else setApproveTarget(null); }}
+        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-5 text-gray-950 shadow-2xl">
+          <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 id="approve-heading" className="font-semibold">Confirmar contratação</h2><p className="mt-1 break-words text-sm text-gray-600">Contratar {approveTarget.name}<ProfessionalVerification userId={approveTarget.id} /> para {current?.job.title}. O chat será liberado após a confirmação.</p></div><Button autoFocus variant="ghost" aria-label="Fechar confirmação" disabled={busy !== ''} onClick={() => setApproveTarget(null)} className="px-2 text-xl">×</Button></div>
           {!current && <p role="status" className="text-sm text-gray-600">O horário de contratação desta operação foi encerrado.</p>}
-          <div className="flex justify-end gap-2"><Button onClick={() => setApproveTarget(null)}>Voltar</Button><Button variant="primary" disabled={!current} busy={busy === approveTarget.id} onClick={() => void approve()}>Confirmar contratação</Button></div>
-        </section>
-      </div>}
+          {errorFeedback}
+          <div className="flex flex-wrap justify-end gap-2"><Button disabled={busy !== ''} onClick={() => setApproveTarget(null)}>Voltar</Button><Button variant="primary" disabled={!current} busy={busy === approveTarget.id} onClick={() => void approve()}>Confirmar contratação</Button></div>
+      </dialog>}
 
       <MobileBottomNav role="restaurant" activeItem="Talentos" showOnDesktop />
     </main>

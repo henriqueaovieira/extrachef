@@ -22,10 +22,10 @@ export interface SuggestionCandidate {
 const hiredStatuses = ['approved', 'in_progress', 'completed'];
 
 export const demandStatusLabels: Record<Exclude<DemandTalentStatus, 'candidate'>, string> = {
-  awaiting: '🟡 Aguardando resposta',
-  accepted: '🟢 Convite aceito',
-  approved: '🟢 Aprovado',
-  unavailable: '⚪ Indisponível para esta demanda',
+  awaiting: 'Convite enviado · Aguardando resposta',
+  accepted: 'Convite aceito · Pronto para avaliação',
+  approved: 'Contratado · Integrado à operação',
+  unavailable: 'Convite encerrado ou recusado',
 };
 
 /**
