@@ -70,18 +70,14 @@ export async function reflow(page: Page, width: number, height: number, zoom = 1
   await page.setViewportSize({ width, height });
   await captureNavigationDiagnostic(page, 'after-setViewportSize');
   const session = await page.context().newCDPSession(page);
-  try {
-    await session.send('Emulation.setDeviceMetricsOverride', {
-      width: Math.round(width / zoom),
-      height: Math.round(height / zoom),
-      deviceScaleFactor: zoom,
-      mobile: false,
-    });
-    await captureNavigationDiagnostic(page, 'after-CDP-override');
-  } finally {
-    await session.detach();
-  }
-  await captureNavigationDiagnostic(page, 'after-CDP-detach');
+  // Detaching resets device metrics; the page context closes this session after the test.
+  await session.send('Emulation.setDeviceMetricsOverride', {
+    width: Math.round(width / zoom),
+    height: Math.round(height / zoom),
+    deviceScaleFactor: zoom,
+    mobile: false,
+  });
+  await captureNavigationDiagnostic(page, 'after-CDP-override');
 }
 
 export async function expectNavigationFits(page: Page, compact: boolean) {
