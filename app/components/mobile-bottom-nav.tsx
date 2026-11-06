@@ -2,9 +2,24 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useCommunication } from '@/app/components/communication-state';
+import { Badge } from '@/app/components/ui';
 
 type UserRole = 'restaurant' | 'worker';
+
+function subscribeToViewport(onChange: () => void) {
+  window.addEventListener('resize', onChange);
+  return () => window.removeEventListener('resize', onChange);
+}
+
+function getCompactMode() {
+  return window.innerWidth <= 375;
+}
+
+function getServerCompactMode() {
+  return false;
+}
 
 const navigationItems: Record<UserRole, Array<{ href: string; label: string; icon: string }>> = {
   restaurant: [
@@ -40,13 +55,32 @@ export default function MobileBottomNav({ role, activeItem, showOnDesktop = fals
   const pathname = usePathname();
   const { counts, chatError } = useCommunication();
   const chatErrorMessage = role === 'worker' && chatError ? 'Não foi possível atualizar as mensagens.' : chatError;
+  const compactMode = useSyncExternalStore(
+    subscribeToViewport,
+    getCompactMode,
+    getServerCompactMode,
+  );
+  const diagnosticNavigation = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const navigation = diagnosticNavigation.current;
+    if (!navigation) return;
+    navigation.dataset.diagnosticHydrated = 'true';
+    navigation.dataset.diagnosticCommit = JSON.stringify({
+      innerWidth: window.innerWidth,
+      outerWidth: window.outerWidth,
+      compactMode,
+    });
+  }, [compactMode]);
 
   return (
     <nav
+      ref={diagnosticNavigation}
+      data-diagnostic-source="a11y004-probe-v1"
+      data-diagnostic-compact-mode={String(compactMode)}
       aria-label="Navegação principal"
-      className={`ec-mobile-nav fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur ${showOnDesktop ? '' : 'md:hidden'}`}
+      className={`ec-mobile-nav fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] ${showOnDesktop ? '' : 'md:hidden'}`}
     >
-      <div className={`mx-auto grid min-h-16 max-w-xl ${role === 'restaurant' ? 'grid-cols-6' : 'grid-cols-4'} px-1`}>
+      <div className={`mx-auto grid min-h-16 max-w-xl ${role === 'restaurant' ? 'grid-cols-6' : 'grid-cols-4'} p-1`}>
         {navigationItems[role].map((item) => {
           const itemPath = item.href.split(/[?#]/)[0];
           const isMessages = item.label === 'Mensagens';
@@ -73,21 +107,21 @@ export default function MobileBottomNav({ role, activeItem, showOnDesktop = fals
               aria-current={isActive ? 'page' : undefined}
               aria-label={unread !== null && unread > 0 ? `${item.label}: ${unread} não lidas` : item.label}
               title={isMessages ? chatErrorMessage || undefined : undefined}
-              className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 px-0.5 text-center transition ${isActive ? 'text-orange-700' : 'text-gray-500 hover:text-gray-800'}`}
+              className="ec-mobile-nav__item flex min-h-16 min-w-0 flex-col items-center justify-center gap-1 text-center transition"
             >
               <span aria-hidden="true" className="relative text-lg leading-5"><RestaurantNavIcon name={item.icon} />
                 {unread !== null && unread > 0 && (
-                  <span className="absolute -right-4 -top-2 min-w-4 rounded-full bg-red-600 px-1 text-[9px] leading-4 text-white">
+                  <Badge tone="info" className="ec-mobile-nav__badge">
                     {unread > 99 ? '99+' : unread}
-                  </span>
+                  </Badge>
                 )}
               </span>
-              <span className="max-w-full whitespace-normal text-[10px] font-semibold leading-3 xs:text-[11px] xs:leading-4">{item.label}</span>
+              <span className={`ec-mobile-nav__label max-w-full whitespace-normal text-[10px] font-semibold leading-4 sm:text-xs ${compactMode ? 'hidden' : ''}`}>{item.label}</span>
             </Link>
           );
         })}
       </div>
-      {chatErrorMessage && <p role="status" className="absolute inset-x-0 bottom-full border-t border-red-100 bg-red-50 px-3 py-2 text-center text-xs text-red-700">{chatErrorMessage}</p>}
+      {chatErrorMessage && <p role="alert" className="ec-mobile-nav__error ec-operational-panel__danger absolute inset-x-0 bottom-full border-t border-gray-200 text-center text-xs">{chatErrorMessage}</p>}
     </nav>
   );
 }

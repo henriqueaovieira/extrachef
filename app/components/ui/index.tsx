@@ -62,20 +62,20 @@ export function Card({ className, as: Element = 'section', ...props }: Omit<Comp
 }
 
 export function Badge({ className, tone = 'neutral', ...props }: ComponentProps<'span'> & {
-  tone?: 'neutral' | 'success' | 'warning' | 'danger';
+  tone?: 'neutral' | 'success' | 'info' | 'warning' | 'danger';
 }) {
   return <span {...props} className={classes('ec-badge', `ec-badge--${tone}`, className)} />;
 }
 
 export function Toast({ children, title, tone = 'success', className, onDismiss, ...props }: Omit<ComponentProps<'div'>, 'title'> & {
   title?: string;
-  tone?: 'success' | 'error' | 'info';
+  tone?: 'success' | 'error' | 'info' | 'warning' | 'danger';
   onDismiss?: () => void;
 }) {
   return (
-    <div {...props} role={tone === 'error' ? 'alert' : 'status'} aria-atomic="true"
+    <div {...props} role={tone === 'error' || tone === 'danger' ? 'alert' : 'status'} aria-atomic="true"
       className={classes('ec-toast', `ec-toast--${tone}`, className)}>
-      <span className="ec-toast__icon" aria-hidden="true">{tone === 'success' ? '✓' : tone === 'error' ? '!' : 'i'}</span>
+      <span className="ec-toast__icon" aria-hidden="true">{tone === 'success' ? '✓' : ['error', 'danger', 'warning'].includes(tone) ? '!' : 'i'}</span>
       <div className="min-w-0 flex-1">
         {title && <p className="font-semibold">{title}</p>}
         <div className="break-words text-sm leading-6">{children}</div>

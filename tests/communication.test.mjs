@@ -487,9 +487,12 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
   let counts = { messages: 0, notifications: 0 };
   let pathname = '/notifications';
   const dependencies = {
+    '@/app/components/ui': loadTs('../app/components/ui/index.tsx', {
+      '@/lib/ui/input-masks': loadTs('../lib/ui/input-masks.ts'),
+    }),
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
     'next/navigation': { usePathname: () => pathname },
-    '@/app/components/communication-state': { useCommunication: () => ({ counts, error: '' }) },
+    '@/app/components/communication-state': { useCommunication: () => ({ counts, error: '', chatError: 'Falha ao atualizar mensagens.' }) },
   };
   const { default: Nav } = loadTs('../app/components/mobile-bottom-nav.tsx', dependencies);
   const { default: Bell } = loadTs('../app/components/notification-bell.tsx', dependencies);
@@ -508,6 +511,8 @@ test('actual navigation badges hide zero/unknown counts and show independent pos
   assert.equal((workerMarkup.match(/aria-current="page"/g) ?? []).length, 1);
   assert.doesNotMatch(workerMarkup, /125|99\+/);
   const restaurantMarkup = renderToStaticMarkup(React.createElement(Nav, { role: 'restaurant' }));
+  assert.match(restaurantMarkup, /role="alert" class="ec-mobile-nav__error/);
+  assert.doesNotMatch(restaurantMarkup, /role="status"/);
   assert.match(restaurantMarkup, /aria-label="Mensagens: 3 não lidas"/);
   assert.doesNotMatch(restaurantMarkup, /Avisos: 125/);
   const bellMarkup = renderToStaticMarkup(React.createElement(Bell));

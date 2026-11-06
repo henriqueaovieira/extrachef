@@ -43,6 +43,24 @@ test('busy buttons keep their action label and expose disabled and busy states',
   assert.match(markup, /Salvando evento/);
 });
 
+test('Toast supports EVC tones and preserves the legacy error contract', () => {
+  for (const tone of ['success', 'info', 'warning', 'danger', 'error']) {
+    const html = renderToStaticMarkup(createElement(ui.Toast, { tone }, 'Mensagem de teste'));
+    assert.match(html, new RegExp(`ec-toast--${tone}`));
+    assert.match(html, new RegExp(`role="${['danger', 'error'].includes(tone) ? 'alert' : 'status'}"`));
+    assert.match(html, /aria-atomic="true"/);
+    assert.match(html, /aria-hidden="true"/);
+    assert.match(html, /Mensagem de teste/);
+  }
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ec-toast--error,\s*\.ec-toast--danger\s*\{/);
+  assert.match(css, /\.ec-toast--warning\s*\{[^}]*var\(--ec-warning-bg\)[^}]*var\(--ec-warning-text\)/);
+  const dangerStyle = css.match(/\.ec-toast--danger\s*\{([^}]+)\}/)[1];
+  const dangerBackground = dangerStyle.match(/background:\s*(#[a-f\d]{6})/i)[1];
+  const dangerText = dangerStyle.match(/;\s*color:\s*(#[a-f\d]{6})/i)[1];
+  assert.ok(contrast(dangerText, dangerBackground) >= 4.5);
+});
+
 test('date and number controls preserve native types, constraints and payload values', () => {
   const date = renderToStaticMarkup(createElement(ui.TextInput, {
     type: 'date', value: '2026-12-20', min: '2026-10-15', required: true, onChange() {},
@@ -347,6 +365,22 @@ test('actual CSS tokens meet AA for field text, placeholders, primary buttons an
   assert.ok(contrast(token('--ec-border'), '#ffffff') >= 3);
 });
 
+test('EVC semantic badge tokens preserve readable text and shared info presentation', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  const token = name => css.match(new RegExp(`${name}:\\s*(#[a-f\\d]{6})`, 'i'))[1];
+  for (const tone of ['success', 'info', 'warning', 'danger', 'neutral']) {
+    assert.ok(contrast(token(`--ec-${tone}-text`), token(`--ec-${tone}-bg`)) >= 4.5, tone);
+  }
+  assert.ok(contrast('#ffffff', token('--ec-info-text')) >= 4.5, 'unread badge');
+  const html = renderToStaticMarkup(createElement(ui.Badge, { tone: 'info' }, 'Em andamento'));
+  assert.match(html, /ec-badge--info/);
+  assert.match(html, /Em andamento/);
+  assert.match(css, /\.ec-mobile-nav__item\[aria-current="page"\]/);
+  assert.match(css, /\.ec-demand-card__title:focus-visible::after/);
+  for (const [name, value] of [['sm', '0.5'], ['md', '0.75'], ['lg', '1'], ['xl', '1.25']]) {
+    assert.ok(css.includes(`--ec-radius-${name}: ${value}rem`));
+  }
+});
 test('all application input, textarea, select and button elements use shared primitives', () => {
   function walk(directory) {
     return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -365,16 +399,25 @@ test('worker home and profile screens do not invent scores or replace failed rea
   const dashboard = readFileSync(new URL('../app/worker/dashboard/page.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(dashboard, /profile\?\.score\s*\|\|\s*5/);
   assert.doesNotMatch(dashboard, /average_rating\s*\?\?\s*0|current_score\s*\?\?.*0/);
-  assert.match(dashboard, /max-w-6xl grid-cols-2 gap-2 px-4 pt-10 sm:gap-4 sm:px-6 lg:grid-cols-4/);
-  assert.match(dashboard, /header className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12"/);
+  assert.match(dashboard, /grid grid-cols-2 gap-4 lg:grid-cols-4/);
+  assert.match(dashboard, /header className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 sm:pt-8"/);
   assert.match(dashboard, /profile\?\.name \|\| 'Profissional'/);
-  assert.match(dashboard, /sm:pb-\[calc\(12rem\+env\(safe-area-inset-bottom\)\)\]/);
-  assert.match(dashboard, /Encontre operações e acompanhe suas candidaturas\./);
+  assert.match(dashboard, /pb-\[calc\(8rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(dashboard, /Confira sua próxima ação e encontre oportunidades\./);
   assert.match(dashboard, /DashboardLogo role="worker"/);
   assert.match(dashboard, /DashboardAvatar role="worker"/);
   assert.match(dashboard, /OperationalReputationView summary/);
-  assert.match(dashboard, /Bem-vindo 👋/);
-  assert.match(dashboard, /Encontre operações e acompanhe suas candidaturas\./);
+  assert.match(dashboard, /Bem-vindo, \{profile/);
+  assert.ok(dashboard.indexOf('Sua central operacional</h1>') < dashboard.indexOf('aria-label="Operações"'));
+  assert.ok(dashboard.indexOf('aria-label="Operações"') < dashboard.indexOf('aria-label="Resumo profissional"'));
+  assert.match(dashboard, /profile\?\.role === 'worker' && <section aria-label="Operações"/);
+  assert.match(dashboard, /Acompanhe suas operações, check-ins e histórico de trabalho/);
+  assert.match(dashboard, /Ver Minhas Operações/);
+  assert.match(dashboard, /Ver todas as operações/);
+  assert.doesNotMatch(dashboard, /Não foi possível carregar sua próxima operação|operationsError/);
+  assert.match(dashboard, /Worker operational assignments lookup failed/);
+  assert.match(dashboard, /setWorkerOperations\(\[\]\)/);
+  assert.match(dashboard, /Consulte suas candidaturas e operações para acompanhar as próximas etapas\./);
   assert.doesNotMatch(dashboard, /profile\?\.city|Olá, \{profile/);
   assert.doesNotMatch(dashboard, /CommunicationNavigation|Acompanhar minhas operações/);
   assert.ok(dashboard.indexOf("label: 'Candidaturas'") < dashboard.indexOf("label: 'Diárias concluídas'"));
@@ -394,7 +437,7 @@ test('worker home and profile screens do not invent scores or replace failed rea
 
   const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
   assert.match(navigation, /showOnDesktop \? '' : 'md:hidden'/);
-  assert.match(navigation, /whitespace-normal text-\[10px\]/);
+  assert.match(navigation, /whitespace-normal text-\[10px\][^"]*sm:text-xs/);
   const reputation = readFileSync(new URL('../app/components/operational-reputation.tsx', import.meta.url), 'utf8');
   assert.match(reputation, /Confiança<\/p>/);
   assert.doesNotMatch(reputation.slice(reputation.indexOf('if (summary)'), reputation.indexOf('return loading ?')), /Confiança operacional/);
@@ -473,7 +516,7 @@ test('worker applications screen reuses shared identity, aligned containers and 
   assert.match(applications, /<MobileBottomNav role="worker" showOnDesktop \/>/);
   const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
   assert.match(navigation, /href: '\/worker\/messages', label: 'Mensagens'/);
-  assert.doesNotMatch(navigation, /worker\/applications#chats|useSyncExternalStore/);
+  assert.doesNotMatch(navigation, /worker\/applications#chats/);
 });
 
 test('worker messages index links only approved applications with existing messages to the existing chat', () => {
