@@ -82,6 +82,7 @@ function database() {
     storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: 'http://localhost:3000/icons/icon-192.png' }, error: null }) }) },
     async rpc(name, parameters) {
       db.calls.push({ name, parameters });
+      if (db.failure === name) return { data: null, error: { message: 'Serviço indisponível' } };
       if (name === 'pending_operational_reviews') return { data: db.pending_reviews, error: null };
       if (db.approvalError) return { error: { message: 'Vaga indisponível' } };
       db.jobs.find(item => item.id === parameters.p_job_id).status = 'filled';
@@ -132,9 +133,10 @@ function mount(db) {
   let effectCursor = 0;
   let dirty = true;
   let tree;
-  const context = { counts: { messages: 4, notifications: 2 }, error: '', chatError: '', refresh: async () => {} };
+  const context = { counts: { messages: 4, notifications: 2 }, error: '', chatError: '', refresh: async () => {}, ...db.communication };
   const navigation = { usePathname: () => '/restaurant/dashboard', useSearchParams: () => new URLSearchParams() };
   const shared = {
+    '@/app/components/ui': ui,
     '@/app/components/professional-verification': { default: () => null },
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
     '@/app/components/communication-state': { useCommunication: () => context },
@@ -176,7 +178,7 @@ function mount(db) {
         if (db.failure === 'messages') throw new Error('Serviço indisponível');
         return db.inboxJobs.map((jobId) => {
           const latest = home.latestMessagesByJob(db.messages.filter(item => item.job_id === jobId)).values().next().value;
-          return { job_id: jobId, worker_name: 'Ana Silva', demand_title: `Demanda ${jobId}`,
+          return { job_id: jobId, worker_id: 'worker-a', worker_name: 'Ana Silva', demand_title: `Demanda ${jobId}`,
             latest_message: latest?.content ?? null, latest_message_at: latest?.created_at ?? null };
         });
       },
@@ -223,20 +225,20 @@ test('home follows the approved order and shows only the three specified summary
   try {
     await app.flush();
     const html = app.html();
-    assert.match(html, /Bem-vindo 👋/);
+    assert.match(html, /Sua central operacional/);
     assert.match(html, /Bella Napoli/);
-    assert.match(html, /Central Operacional do seu restaurante/);
+    assert.match(html, /Acompanhe suas pendências e operações\./);
     const approvedOrder = [
       'aria-label="ExtraChef — Home"',
       'href="/notifications"',
       'aria-label="Meu perfil"',
-      'Bem-vindo 👋',
       'Bella Napoli',
-      'Central Operacional do seu restaurante',
-      'aria-label="Resumo operacional"',
+      'Sua central operacional',
+      'Acompanhe suas pendências e operações.',
       'id="pending-heading"',
       'id="operations-heading"',
       'id="conversations-heading"',
+      'aria-label="Resumo operacional"',
       'href="/restaurant/dashboard/jobs/create"',
       'aria-label="Navegação principal"',
     ].map(marker => html.indexOf(marker));
@@ -247,19 +249,21 @@ test('home follows the approved order and shows only the three specified summary
     assert.match(html, /Analisar e contratar/);
     assert.match(html, /Responder/);
     assert.match(html, /Equipe incompleta/);
-    assert.match(html, /Operações/);
+    assert.match(html, /Operação em evidência/);
     assert.doesNotMatch(html, /Operações ativas|Operações futuras|Próxima ação necessária/);
     assert.match(html, /Operações em andamento/);
     assert.match(html, /Próximas operações/);
     assert.match(html, /Mensagens não lidas/);
     assert.equal((html.match(/Operações em andamento|Próximas operações|Mensagens não lidas/g) ?? []).length, 3);
-    assert.doesNotMatch(html, /Receita|Faturamento|Avaliações|Conversões/);
+    assert.doesNotMatch(html, /Receita|Faturamento|Avaliações|Conversões|Bem-vindo/);
     assert.doesNotMatch(html, /posições preenchidas|Acessos rápidos|Conversas importantes/);
     assert.equal(app.elements().filter(item => item.props?.id === 'next-demand').length, 0);
     const recentSection = app.elements().find(item => item.props?.['aria-labelledby'] === 'conversations-heading');
     const recentHtml = renderToStaticMarkup(recentSection);
     assert.equal((recentHtml.match(/href="\/chat\//g) ?? []).length, 3);
     assert.match(recentHtml, /Mensagem 05/);
+    assert.match(recentHtml, /Conversa com Ana Silva sobre Demanda b/);
+    assert.match(recentHtml, />Demanda b</);
     assert.doesNotMatch(recentHtml, /Mensagem 02/);
     assert.doesNotMatch(recentHtml, /Ainda não existem conversas/);
     for (const label of ['Home', 'Operações', 'Talentos', 'Mensagens', 'Mais', 'Criar Operação']) assert.match(html, new RegExp(label));
@@ -327,11 +331,94 @@ test('operation cards prioritize in-progress, today, tomorrow, then later dates'
     const html = renderToStaticMarkup(operations);
     const links = [...html.matchAll(/href="\/restaurant\/demands\/([^"]+)"/g)].map(match => match[1]);
     assert.deepEqual(links, ['running', 'today', 'tomorrow', 'future']);
+    assert.equal((html.match(/data-priority="primary"/g) ?? []).length, 1);
+    assert.match(html, /href="\/restaurant\/demands\/running" data-priority="primary"/);
+    assert.match(html, /ec-badge--info[^>]*>Em andamento/);
+    assert.doesNotMatch(html, /ec-badge--success|bg-emerald/);
+    const first = html.slice(html.indexOf('data-priority="primary"'), html.indexOf('href="/restaurant/demands/today"'));
+    const markers = ['Em andamento', 'Bartender', '00:00 às 23:59', 'Rua Central, 123', 'Diária:'];
+    assert.ok(markers.every(marker => first.includes(marker)));
+    assert.deepEqual(markers.map(marker => first.indexOf(marker)), markers.map(marker => first.indexOf(marker)).sort((a,b) => a-b));
     assert.match(html, /Em andamento/);
     assert.match(html, /Rua Central, 123/);
     assert.match(html, /São Paulo - SP/);
     assert.match(html, /R\$\u00a0150,00/);
   } finally { app.unmount(); }
+});
+
+test('operational failures are visible danger alerts before pending actions without changing the loader', async () => {
+  for (const failure of ['operational_assignments', 'pending_operational_reviews']) {
+    const db = database();
+    db.failure = failure;
+    const app = mount(db);
+    try {
+      await app.flush();
+      const html = app.html();
+      assert.match(html, /role="alert"[^>]*class="ec-toast ec-toast--danger"/);
+      assert.ok(html.indexOf('Serviço indisponível') < html.indexOf('id="pending-heading"'));
+      assert.doesNotMatch(html, /Tudo em dia/);
+      const create = app.elements().find(item => item.props?.href === '/restaurant/dashboard/jobs/create');
+      assert.match(create.props.className, /ec-button--secondary/);
+    } finally { app.unmount(); }
+  }
+  for (const field of ['chatError', 'error']) {
+    const db = database();
+    db.communication = { [field]: 'Falha de comunicação.' };
+    const app = mount(db);
+    try {
+      await app.flush();
+      const feedback = app.elements().find(item => item.props?.tone === 'danger' && item.props.children === 'Falha de comunicação.');
+      assert.ok(feedback);
+      assert.match(renderToStaticMarkup(feedback), /role="alert"/);
+      assert.ok(app.html().indexOf('Falha de comunicação.') < app.html().indexOf('id="pending-heading"'));
+      assert.match(readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8'), /\.ec-restaurant-home \.ec-mobile-nav__error\s*\{\s*display: none;/);
+    } finally { app.unmount(); }
+  }
+});
+
+test('pending groups keep reviews, operational actions, recent applications/messages and staffing in their existing order', async () => {
+  const db = database();
+  db.pending_reviews = [{ job_id:'review', title:'Avaliação de teste', reviewed_name:'Profissional de teste' }];
+  db.jobs.push(job('arrival', { job_date: dateOffset(-1), start_time:'08:00:00', end_time:'09:00:00', status:'filled' }));
+  db.operational_assignments = [{ id:'assignment', job_id:'arrival', worker_id:'worker', checkin_at:null, checkout_at:null, interruption:null }];
+  const app = mount(db);
+  try {
+    await app.flush();
+    const pending = renderToStaticMarkup(app.elements().find(item => item.props?.['aria-labelledby'] === 'pending-heading'));
+    assert.ok(pending.indexOf('href="/reviews/review"') < pending.indexOf('href="/checkin/arrival"'));
+    assert.ok(pending.indexOf('href="/checkin/arrival"') < pending.indexOf('Analisar e contratar'));
+    assert.ok(pending.indexOf('Analisar e contratar') < pending.indexOf('Equipe incompleta'));
+    assert.match(pending, /ec-badge--warning/);
+    assert.doesNotMatch(pending, /truncate|line-clamp|ec-badge--success/);
+    const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+    assert.match(css, /\.ec-restaurant-home__actions > article:first-child\s*\{/);
+    assert.match(css, /\.ec-restaurant-home__actions > article:first-child \.ec-button:not\(\.ec-button--ghost\)\s*\{[^}]*var\(--ec-brand\)/);
+    const create = app.elements().find(item => item.props?.href === '/restaurant/dashboard/jobs/create');
+    assert.match(create.props.className, /ec-button--secondary/);
+  } finally { app.unmount(); }
+});
+
+test('create operation remains primary only in a confirmed empty home, and operation action is primary without pending items', async () => {
+  const db = database();
+  db.jobs=[]; db.applications=[]; db.messages=[]; db.inboxJobs=[];
+  const empty = mount(db);
+  try {
+    await empty.flush();
+    const create = empty.elements().find(item => item.props?.href === '/restaurant/dashboard/jobs/create');
+    assert.match(create.props.className, /ec-button--primary/);
+    assert.match(empty.html(), /Tudo em dia/);
+  } finally { empty.unmount(); }
+  db.jobs=[job('filled', {status:'filled'})];
+  const operationOnly = mount(db);
+  try {
+    await operationOnly.flush();
+    const section = operationOnly.elements().find(item => item.props?.['aria-labelledby'] === 'operations-heading');
+    const html = renderToStaticMarkup(section);
+    assert.match(html, /ec-button[^"]*ec-button--primary[^>]*>Ver operação/);
+    assert.match(html, /ec-badge--info[^>]*>Equipe confirmada/);
+    const create = operationOnly.elements().find(item => item.props?.href === '/restaurant/dashboard/jobs/create');
+    assert.match(create.props.className, /ec-button--secondary/);
+  } finally { operationOnly.unmount(); }
 });
 
 test('empty home is honest and query failures never masquerade as all caught up', async () => {
@@ -376,12 +463,12 @@ test('all pending actions expand in place instead of sending different action ty
   const app = mount(db);
   try {
     await app.flush();
-    const before = app.elements().filter(item => item.type === 'article').length;
+    const before = app.elements().filter(item => item.type === ui.Card && item.props.as === 'article').length;
     const expand = app.elements().find(item => item.props?.children === 'Ver todas as pendências');
     assert.equal(expand.props['aria-expanded'], false);
     expand.props.onClick();
     await app.flush();
-    assert.equal(app.elements().filter(item => item.type === 'article').length, before + 4);
+    assert.equal(app.elements().filter(item => item.type === ui.Card && item.props.as === 'article').length, before + 4);
     assert.match(app.html(), /Mostrar menos/);
   } finally { app.unmount(); }
 });
@@ -389,6 +476,7 @@ test('all pending actions expand in place instead of sending different action ty
 test('restaurant navigation has exactly one active destination, including messages and nested creation', () => {
   let pathname = '/restaurant/dashboard';
   const Nav = loadTs('../app/components/mobile-bottom-nav.tsx', {
+    '@/app/components/ui': ui,
     'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
     'next/navigation': { usePathname: () => pathname },
     '@/app/components/communication-state': {

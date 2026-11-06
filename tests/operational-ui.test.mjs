@@ -18,10 +18,252 @@ function load(file, dependencies = {}) {
   return exports;
 }
 const operations = load('../lib/operations.ts');
+const demandDomain = load('../lib/demands.ts');
+const coreAssignment = (changes = {}) => ({
+  id: 'assignment0', job_id: 'job0', worker_id: 'worker0', checkin_at: null,
+  paid_at: null, payment_disputed_at: null, receipt_confirmed_at: null, checkout_at: null,
+  interruption: null, interrupted_at: null, replacement_job_id: null, ...changes,
+});
+function coreInput({ assignments = [coreAssignment()], required = 1, now = '2026-10-17T15:00:00Z', completed = false, ...changes } = {}) {
+  const jobs = Array.from({ length: required }, (_, index) => ({
+    id: `job${index}`, demand_id: 'operation', demand_revision: 0, title: 'Operação',
+    job_date: '2026-10-17', start_time: '10:00:00', end_time: '18:00:00',
+    status: completed ? 'completed' : assignments.some((item) => item.job_id === `job${index}` && !item.interruption) ? 'filled' : 'open',
+    location_status: 'ready', work_latitude: -23, work_longitude: -46, value: 150,
+  }));
+  const applications = assignments.filter((item) => jobs.some((job) => job.id === item.job_id))
+    .map((item) => ({ job_id: item.job_id, worker_id: item.worker_id, status: item.interruption ? item.interruption : completed ? 'completed' : 'approved' }));
+  return {
+    demand: demandDomain.buildDemands(jobs, applications, [], new Date(now))[0], assignments,
+    windows: new Map(jobs.map((job) => [job.id, demandDomain.demandWindow(job)])),
+    now: new Date(now), canHire: true, canRecruit: true, ...changes,
+  };
+}
+const checkedIn = { checkin_at: '2026-10-17T13:00:00Z' };
+const received = { ...checkedIn, paid_at: '2026-10-17T21:00:00Z', receipt_confirmed_at: '2026-10-17T21:01:00Z' };
+const finished = { ...received, checkout_at: '2026-10-17T21:02:00Z' };
+const ended = '2026-10-17T22:00:00Z';
+
+for (const [name, options, expected] of [
+  ['future', { now: '2026-10-17T12:00:00Z' }, 'Planejada'],
+  ['incomplete', { required: 2 }, 'Preparação'],
+  ['active checkin', { assignments: [coreAssignment(checkedIn)] }, 'Em andamento'],
+  ['checkout pending', { now: ended, assignments: [coreAssignment(received)] }, 'Encerramento'],
+  ['financial pending', { now: ended, assignments: [coreAssignment(checkedIn)] }, 'Financeiro'],
+  ['completed', { now: ended, completed: true, assignments: [coreAssignment(finished)] }, 'Finalizada'],
+  ['financial beats checkout', { now: ended, required: 2, assignments: [
+    coreAssignment(received), coreAssignment({ ...checkedIn, id: 'assignment1', job_id: 'job1', worker_id: 'worker1' }),
+  ] }, 'Financeiro'],
+  ['completed beats residual financial data', { now: ended, completed: true, assignments: [
+    coreAssignment({ ...checkedIn, checkout_at: finished.checkout_at }),
+  ] }, 'Finalizada'],
+]) test(`operation core state: ${name}`, () => {
+  const input = coreInput(options);
+  const original = structuredClone(input);
+  assert.equal(operations.getOperationState(input), expected);
+  assert.deepEqual(input, original);
+});
+
+for (const [name, options, kind, href] of [
+  ['financial beats checkout', { now: ended, required: 2, assignments: [
+    coreAssignment(received), coreAssignment({ ...checkedIn, id: 'assignment1', job_id: 'job1', worker_id: 'worker1' }),
+  ] }, 'financial', '/payment/job1'],
+  ['checkout beats checkin', { now: ended, required: 2, assignments: [
+    coreAssignment(received), coreAssignment({ id: 'assignment1', job_id: 'job1', worker_id: 'worker1' }),
+  ] }, 'checkout', '/checkout/job0'],
+  ['checkin beats hiring', { required: 2 }, 'checkin', '/checkin/job0'],
+]) test(`operation core action priority: ${name}`, () => {
+  const input = coreInput(options);
+  const action = operations.getOperationContinuation(input);
+  assert.equal(action.kind, kind);
+  assert.equal(action.action.href, href);
+  assert.deepEqual(action, operations.getOperationContinuation({ ...input, assignments: [...input.assignments].reverse() }));
+});
+
+for (const [name, assignment, expected] of [
+  ['on time', checkedIn, 'present'],
+  ['late', { checkin_at: '2026-10-17T13:05:01Z' }, 'late'],
+  ['pending is not absent', {}, 'pending'],
+  ['confirmed absence', { interruption: 'absent', interrupted_at: '2026-10-17T13:10:00Z' }, 'absent'],
+  ['checkout overrides arrival', finished, 'finished'],
+]) test(`operation core presence: ${name}`, () => {
+  const summary = operations.getOperationSummary(coreInput({ assignments: [coreAssignment(assignment)], now: ended }));
+  assert.equal(summary.available, true);
+  assert.equal(summary.participants.length, 1);
+  assert.equal(summary.participants[0].presence, expected);
+  assert.equal(summary.absences, expected === 'absent' ? 1 : 0);
+});
+
+for (const [name, options, label] of [
+  ['no team', { assignments: [] }, 'Contratar profissionais'],
+  ['incomplete team', { required: 2, now: '2026-10-17T12:00:00Z' }, 'Completar equipe'],
+  ['pending checkin', {}, 'Realizar check-ins'],
+  ['active', { assignments: [coreAssignment(checkedIn)] }, 'Acompanhar operação'],
+  ['pending checkout', { now: ended, assignments: [coreAssignment(received)] }, 'Finalizar participantes'],
+  ['pending financial', { now: ended, assignments: [coreAssignment(checkedIn)] }, 'Regularizar pagamentos'],
+  ['completed', { now: ended, completed: true, assignments: [coreAssignment(finished)] }, 'Encerrar acompanhamento'],
+]) test(`operation core continuation: ${name}`, () => {
+  assert.equal(operations.getOperationContinuation(coreInput(options)).label, label);
+});
+
+test('operation core summary preserves replacements, scopes rows and counts real zero without duplication', () => {
+  const previous = coreAssignment({ id: 'previous', worker_id: 'previous', interruption: 'absent', interrupted_at: '2026-10-17T13:10:00Z' });
+  const current = coreAssignment(checkedIn);
+  const input = coreInput({ assignments: [previous, current, { ...current }, coreAssignment({ job_id: 'foreign' })] });
+  const summary = operations.getOperationSummary(input);
+  assert.equal(summary.available, true);
+  assert.equal(summary.confirmed, 1);
+  assert.equal(summary.present, 1);
+  assert.equal(summary.arrivalsPending, 0);
+  assert.equal(summary.absences, 1);
+  assert.equal(summary.checkouts, 0);
+  assert.equal(summary.participants.length, 2);
+  assert.equal(operations.getOperationState(input), 'Em andamento');
+  assert.equal(operations.getOperationContinuation(input).kind, 'working');
+});
+
+test('operation core respects exact tolerance and does not infer absence or active work from the clock', () => {
+  const onBoundary = coreInput({ now: '2026-10-17T13:05:00Z' });
+  assert.equal(operations.getOperationSummary(onBoundary).arrivalsPending, 0);
+  onBoundary.now = new Date('2026-10-17T13:05:00.001Z');
+  assert.equal(operations.getOperationSummary(onBoundary).arrivalsPending, 1);
+  assert.equal(operations.getOperationSummary(onBoundary).absences, 0);
+  assert.equal(operations.getOperationState(onBoundary), 'Preparação');
+  assert.equal(operations.getOperationSummary(coreInput({ assignments: [
+    coreAssignment({ checkin_at: '2026-10-17T13:05:00Z' }),
+  ] })).participants[0].presence, 'present');
+  const completedLate = operations.getOperationSummary(coreInput({ now: ended, assignments: [
+    coreAssignment({ ...finished, checkin_at: '2026-10-17T13:05:01Z' }),
+  ] }));
+  assert.equal(completedLate.participants[0].presence, 'finished');
+  assert.equal(completedLate.participants[0].late, true);
+  assert.equal(completedLate.present, 0);
+  const interrupted = operations.getOperationSummary(coreInput({ assignments: [
+    coreAssignment({ ...checkedIn, interruption: 'abandoned', interrupted_at: '2026-10-17T14:00:00Z' }),
+  ] }));
+  assert.equal(interrupted.participants[0].presence, 'interrupted');
+  assert.equal(interrupted.present, 0);
+  assert.equal(interrupted.absences, 0);
+});
+
+test('operation core fails closed for missing, conflicting or unavailable operational data', () => {
+  const missing = coreInput();
+  missing.assignments = [];
+  for (const input of [
+    missing, coreInput({ unavailable: true }),
+    coreInput({ windows: new Map() }),
+    coreInput({ now: 'invalid' }),
+    coreInput({ assignments: [coreAssignment({ checkin_at: 'invalid' })] }),
+    coreInput({ assignments: [coreAssignment(), coreAssignment(checkedIn)] }),
+    coreInput({ assignments: [coreAssignment(), coreAssignment({ id: 'another', worker_id: 'another' })] }),
+  ]) {
+    assert.equal(operations.getOperationSummary(input).available, false);
+    assert.equal(operations.getOperationState(input), null);
+    assert.equal(operations.getOperationContinuation(input).kind, 'unavailable');
+    assert.equal(operations.getOperationContinuation(input).action, null);
+  }
+});
+
+test('operation core does not hide an open participant behind a terminal demand snapshot', () => {
+  const input = coreInput({ now: ended, completed: true, assignments: [coreAssignment(checkedIn)] });
+  assert.equal(operations.getOperationState(input), 'Financeiro');
+  assert.equal(operations.getOperationContinuation(input).kind, 'financial');
+  input.assignments[0].checkout_at = finished.checkout_at;
+  assert.equal(operations.getOperationSummary(input).financial.length, 1);
+  assert.equal(operations.getOperationState(input), 'Finalizada');
+  assert.equal(operations.getOperationContinuation(input).kind, 'completed');
+});
+
+test('operation core preserves incidents, closed hiring gates, reviews and payment ownership', () => {
+  const incident = coreInput({ assignments: [coreAssignment({ interruption: 'absent', interrupted_at: '2026-10-17T13:10:00Z' })] });
+  assert.equal(operations.getOperationContinuation(incident).kind, 'incident');
+  assert.match(operations.getOperationContinuation(incident).action.href, /#reserve-heading$/);
+  const closed = coreInput({ assignments: [], canHire: false, canRecruit: false });
+  assert.match(operations.getOperationContinuation(closed).action.href, /#team-heading$/);
+  const review = coreInput({ now: ended, completed: true, assignments: [coreAssignment(finished)], reviews: [{ job_id: 'job0' }] });
+  assert.equal(operations.getOperationContinuation(review).action.href, '/reviews/job0');
+  const payment = coreInput({ now: ended, assignments: [coreAssignment({ ...checkedIn, paid_at: received.paid_at })] });
+  assert.match(operations.getOperationContinuation(payment).responsible, /Profissional confirma/);
+  payment.assignments[0].payment_disputed_at = ended;
+  assert.equal(operations.getOperationContinuation(payment).action.label, 'Confirmar Pagamento');
+  assert.match(operations.getOperationContinuation(payment).responsible, /regularizar/);
+  payment.demand.cancelled = true;
+  assert.equal(operations.getOperationState(payment), null);
+  assert.equal(operations.getOperationContinuation(payment).kind, 'cancelled');
+  const candidate = coreInput({ now: '2026-10-17T12:00:00Z' });
+  candidate.demand.candidates = 1;
+  assert.equal(operations.getOperationContinuation(candidate).kind, 'candidates');
+  candidate.canHire = false;
+  assert.equal(operations.getOperationContinuation(candidate).kind, 'working');
+});
+
+test('H01-001: active incomplete operation recommends monitoring when hiring and recruiting are blocked', () => {
+  const input = coreInput({ required: 2, assignments: [coreAssignment(checkedIn)], canHire: false, canRecruit: false });
+  assert.equal(operations.getOperationState(input), 'Em andamento');
+  const continuation = operations.getOperationContinuation(input);
+  assert.equal(continuation.label, 'Acompanhar operação');
+  assert.match(continuation.action.href, /#operation-flow-heading$/);
+  assert.match(continuation.description, /Trabalho em andamento/);
+});
+
+test('H01-002: blocked hiring never produces a recruitment CTA or recommendation', () => {
+  for (const assignments of [[], [coreAssignment(checkedIn)]]) {
+    const input = coreInput({ required: 2, assignments, canHire: false, canRecruit: false });
+    const original = structuredClone(input);
+    const continuation = operations.getOperationContinuation(input);
+    assert.doesNotMatch(continuation.label, /Completar equipe|Contratar profissionais/);
+    assert.doesNotMatch(continuation.action.label, /Convidar|Contratar|Completar|Analisar candidatos/);
+    assert.doesNotMatch(continuation.action.href, /\?view=(talents|candidates)/);
+    assert.deepEqual(input, original);
+  }
+});
+
+test('H01-003: an incomplete active operation can recommend completing the team when hiring is allowed', () => {
+  const input = coreInput({ required: 2, assignments: [coreAssignment(checkedIn)], canHire: true, canRecruit: false });
+  input.demand.candidates = 1;
+  assert.equal(operations.getOperationContinuation(input).label, 'Completar equipe');
+  assert.match(operations.getOperationContinuation(input).action.href, /\?view=candidates$/);
+});
+
+test('H01-004: a complete active operation keeps monitoring and higher priorities stay intact', () => {
+  const active = coreInput({ assignments: [coreAssignment(checkedIn)], canHire: false, canRecruit: false });
+  assert.equal(operations.getOperationContinuation(active).label, 'Acompanhar operação');
+  for (const [assignment, now, kind] of [
+    [coreAssignment(), '2026-10-17T15:00:00Z', 'checkin'],
+    [coreAssignment(checkedIn), ended, 'financial'],
+    [coreAssignment(received), ended, 'checkout'],
+  ]) {
+    assert.equal(operations.getOperationContinuation(coreInput({
+      required: 2, assignments: [assignment], now, canHire: false, canRecruit: false,
+    })).kind, kind);
+  }
+});
+
+test('operation core action destinations agree with the existing flow and Team contracts', () => {
+  const { describeHire } = load('../lib/restaurant-team.ts');
+  for (const [phase, assignment, now] of [
+    ['payment', coreAssignment(checkedIn), ended],
+    ['receipt', coreAssignment({ ...checkedIn, paid_at: received.paid_at }), ended],
+    ['payment_disputed', coreAssignment({ ...checkedIn, paid_at: received.paid_at, payment_disputed_at: ended }), ended],
+    ['checkout', coreAssignment(received), ended],
+    ['absence_pending', coreAssignment(), '2026-10-17T15:00:00Z'],
+  ]) {
+    const input = coreInput({ assignments: [assignment], now });
+    const window = input.windows.get('job0');
+    const flow = operations.getOperationFlow({ jobId: 'job0', role: 'restaurant', hired: true,
+      assignment, startsAt: window.start, endsAt: window.end, now: input.now });
+    const team = describeHire({ ...context(), ...assignment, role: 'restaurant', phase,
+      starts_at: window.start.toISOString(), ends_at: window.end.toISOString() }, input.now);
+    const continuation = operations.getOperationContinuation(input);
+    assert.equal(continuation.action.href, flow.action.href, phase);
+    assert.equal(continuation.action.href, team.action.href, phase);
+  }
+});
 const ui = load('../app/components/ui/index.tsx', {
   '@/lib/ui/input-masks': load('../lib/ui/input-masks.ts'),
 });
 const OperationFlow = load('../app/components/operation-flow.tsx', {
+  '@/app/components/ui': ui,
   '@/lib/operations': operations,
   'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
 }).default;
@@ -30,7 +272,7 @@ const LocationFormStub = () => React.createElement('div', { 'data-testid': 'loca
 const primaryLocation = (overrides = {}) => ({
   id: 'primary', restaurant_id: 'company', name: 'Matriz', address: 'Rua das Flores', number: '120',
   neighborhood: 'Centro', city: 'São Paulo', state: 'SP', postal_code: '01001000', country_code: 'BR',
-  latitude: -23.5, longitude: -46.6, geocoding_status: 'resolved', geocoding_precision: 'house',
+  latitude: -23.5, longitude: -46.6, geocoding_status: 'resolved', geocoding_precision: 'device',
   geocoding_error_code: null, candidate_latitude: null, candidate_longitude: null, kind: 'permanent',
   valid_until: null, confirmed_at: '2026-01-01T00:00:00Z', address_version: 1, revision: 3, is_default: true,
   archived_at: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', ...overrides,
@@ -44,6 +286,7 @@ const context = (overrides = {}) => ({
 });
 function mount(initial, file = '../app/components/operational-panel.tsx') {
   const previousWindow = globalThis.window;
+  const previousFetch = globalThis.fetch;
   const listeners = new Map();
   let interval;
   globalThis.window = {
@@ -57,8 +300,12 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
   const db = {
     value: initial, failure: null, rpcError: null, calls: [], queries: [], pendingReviews: [], navigation: [], locationLoads: [],
     locations: [primaryLocation()], locationsError: null,
-    gpsCalls: 0, gpsError: null, coordinates: { latitude: -23.5, longitude: -46.6, accuracy: 10 },
-    auth: { getUser: async () => ({ data: { user: { id: 'company' } }, error: null }) },
+    fetchCalls: [], apiError: null,
+    gpsCalls: 0, gpsError: null, coordinates: { latitude: -23.5, longitude: -46.6, accuracy: 10, speed: null, isMock: false },
+    auth: {
+      getUser: async () => ({ data: { user: { id: 'company' } }, error: null }),
+      getSession: async () => ({ data: { session: { access_token: 'session-token' } }, error: null }),
+    },
     from: (table) => {
       db.queries.push(table);
       return { select: () => ({ eq: () => ({ order: async () => ({ data: [], error: null }) }) }) };
@@ -71,6 +318,11 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
       return name === 'operational_context' ? { data: db.value, error: null }
         : db.failure ? { data: db.failure, error: null } : { data: db.value, error: null };
     },
+  };
+  globalThis.fetch = async (url, options) => {
+    db.fetchCalls.push({ url, options });
+    return Response.json(db.apiError ? { error: db.apiError.message } : db.value,
+      { status: db.apiError ? db.apiError.status ?? 400 : 200 });
   };
   const Component = load(file, {
     '@/app/components/operation-flow': { default: OperationFlow },
@@ -149,6 +401,7 @@ function mount(initial, file = '../app/components/operational-panel.tsx') {
       effects.forEach(effect => effect.cleanup?.());
       assert.equal(listeners.size, 0);
       globalThis.window = previousWindow;
+      globalThis.fetch = previousFetch;
     },
   };
 }
@@ -200,6 +453,51 @@ test('shared operation timeline gates every stage identically for both roles', (
   }
 });
 
+test('operational presentation shares semantic tones without changing stages or actions', async () => {
+  const end = new Date('2026-10-18T03:00:00-03:00');
+  const cases = [
+    ['confirmed', 'info', {}],
+    ['checkin', 'warning', {}],
+    ['absence_pending', 'warning', {}],
+    ['working', 'info', { checkin_at: end.toISOString() }],
+    ['payment', 'warning', { checkin_at: end.toISOString() }],
+    ['receipt', 'warning', { checkin_at: end.toISOString(), paid_at: end.toISOString() }],
+    ['payment_disputed', 'danger', { checkin_at: end.toISOString(), payment_disputed_at: end.toISOString() }],
+    ['checkout', 'warning', { checkin_at: end.toISOString(), receipt_confirmed_at: end.toISOString() }],
+    ['completed', 'success', { checkin_at: end.toISOString(), receipt_confirmed_at: end.toISOString(), checkout_at: end.toISOString() }],
+    ['cancelled', 'neutral', { interruption: 'cancelled' }],
+    ['absent', 'danger', { interruption: 'absent' }],
+    ['abandoned', 'danger', { interruption: 'abandoned' }],
+  ];
+  for (const role of ['worker', 'restaurant']) {
+    for (const [phase, tone, changes] of cases) {
+      const input = { jobId: 'job', role, hired: true, assignment: context(changes),
+        endsAt: end, now: phase === 'working' ? new Date(end.getTime() - 1) : end, phase };
+      const flow = operations.getOperationFlow(input);
+      const html = renderToStaticMarkup(React.createElement(OperationFlow, input));
+      assert.match(html, new RegExp(`ec-badge--${tone} ec-operation-status`), `${role}: ${phase}`);
+      assert.equal((html.match(/data-state="/g) ?? []).length, 6);
+      assert.match(html, /Responsável pela próxima etapa/);
+      assert.match(html, /Quando agir/);
+      assert.match(html, new RegExp(`role="${tone === 'danger' ? 'alert' : 'status'}"`));
+      if (flow.action) assert.ok(html.includes(`href="${flow.action.href}"`));
+      const app = mount(context({ ...changes, role, phase }));
+      try {
+        await app.flush();
+        const panel = app.html();
+        assert.match(panel, new RegExp(`ec-badge--${tone} ec-operation-status`), `${role}: panel ${phase}`);
+        assert.match(panel, /<article[^>]*ec-operational-panel/);
+        if (phase === 'payment' && role === 'restaurant') {
+          assert.ok(panel.indexOf('Confirmar Pagamento') < panel.indexOf('Etapas da operação'));
+        }
+        if (phase === 'checkin') {
+          assert.ok(panel.indexOf(role === 'worker' ? 'Realizar Check-in' : 'Confirmar Check-in') < panel.indexOf('Etapas da operação'));
+        }
+      } finally { app.unmount(); }
+    }
+  }
+});
+
 test('operational context refresh failures remove stale actionable controls', async () => {
   const app = mount(context({ role: 'restaurant', phase: 'payment', checkin_at: '2026-10-17T18:00:00-03:00' }));
   try {
@@ -211,6 +509,30 @@ test('operational context refresh failures remove stale actionable controls', as
     assert.match(app.html(), /Estado indisponível/);
     assert.doesNotMatch(app.html(), /Confirmar Pagamento|href="\/chat\//);
   } finally { app.unmount(); }
+});
+
+test('flow responsibility follows existing stage truth without changing actions or timeline', () => {
+  const end = new Date('2026-10-17T23:00:00-03:00');
+  for (const role of ['worker', 'restaurant']) {
+    for (const [changes, phase, responsible] of [
+      [{}, 'checkin', 'Profissional apresenta o código; restaurante confirma o check-in'],
+      [{ checkin_at: 'x' }, 'payment', 'Restaurante · confirmar pagamento'],
+      [{ checkin_at: 'x', paid_at: 'x' }, 'receipt', 'Profissional · confirmar recebimento'],
+      [{ checkin_at: 'x', paid_at: 'x', payment_disputed_at: 'x' }, 'payment_disputed', 'Restaurante · confirmar pagamento'],
+      [{ checkin_at: 'x', receipt_confirmed_at: 'x' }, 'checkout', 'Restaurante gera o código; profissional realiza o checkout'],
+    ]) {
+      const input = { role, phase, jobId: 'job', hired: true, assignment: context(changes), endsAt: end, now: end };
+      const expected = operations.getOperationFlow(input);
+      const html = renderToStaticMarkup(React.createElement(OperationFlow, input));
+      assert.ok(html.includes(responsible), `${role}: ${phase}`);
+      assert.ok(html.indexOf('Responsável pela próxima etapa') < html.indexOf('<ol'));
+      assert.ok(html.includes(`href="${expected.action.href}"`));
+      assert.deepEqual([...html.matchAll(/data-stage="([^"]+)"/g)].map(match => match[1]), expected.steps.map(step => step.label));
+    }
+    const unknown = renderToStaticMarkup(React.createElement(OperationFlow, { role, jobId: 'job', hired: true, assignment: null, endsAt: end, now: end }));
+    assert.match(unknown, /role="alert"[^>]*ec-badge--danger/);
+    assert.doesNotMatch(unknown, /href="\/(?:checkin|payment|checkout)\//);
+  }
 });
 
 test('next action respects overnight time boundaries, receipt, checkout and interruptions', () => {
@@ -241,11 +563,13 @@ test('worker emits arrival code, company validates it and errors never become su
     app.button('Realizar Check-in').props.onClick();
     await app.flush();
     assert.match(app.html(), /A1B2C3D4/);
-    assert.equal(app.db.calls.at(-1).name, 'issue_operational_code');
     assert.equal(app.db.gpsCalls, 1);
-    assert.deepEqual(app.db.calls.at(-1).args, {
-      p_job_id: 'job', p_stage: 'checkin', p_latitude: -23.5, p_longitude: -46.6,
+    assert.equal(app.db.fetchCalls.at(-1).url, '/api/checkin');
+    assert.equal(app.db.fetchCalls.at(-1).options.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(JSON.parse(app.db.fetchCalls.at(-1).options.body), {
+      jobId: 'job', latitude: -23.5, longitude: -46.6, accuracy: 10, speed: null, isMock: false,
     });
+    assert.match(app.html(), /Presença validada\. Código operacional liberado/);
   } finally { app.unmount(); }
   const company = mount(context({ role: 'restaurant', has_code: true }));
   try {
@@ -266,9 +590,8 @@ test('worker emits arrival code, company validates it and errors never become su
 
 test('GPS failure prevents issuing a check-in code and allows a fresh retry', async () => {
   for (const message of [
-    'Permita o acesso à localização para utilizar este recurso.',
-    'Não foi possível obter sua localização a tempo. Tente novamente.',
-    'Não foi possível obter sua localização. Verifique o GPS e tente novamente.',
+    'Ative sua localização para registrar presença.',
+    'Aguardando uma localização mais precisa. Tente novamente em alguns segundos.',
   ]) {
     const app = mount(context());
     try {
@@ -280,11 +603,11 @@ test('GPS failure prevents issuing a check-in code and allows a fresh retry', as
       assert.equal(app.db.calls.filter(call => call.name === 'issue_operational_code').length, 0);
       assert.equal(app.button('Realizar Check-in').props.busy, false);
       app.db.gpsError = null;
-      app.db.rpcError = { message: 'Você está fora do raio de 100 metros do local da operação.' };
+      app.db.apiError = { message: 'Você parece estar distante do local da operação.' };
       app.button('Realizar Check-in').props.onClick();
       await app.flush();
-      assert.match(app.html(), /fora do raio de 100 metros/);
-      assert.doesNotMatch(app.html(), /Código gerado/);
+      assert.match(app.html(), /distante do local da operação/);
+      assert.doesNotMatch(app.html(), /Código operacional liberado/);
       assert.equal(app.db.gpsCalls, 2);
     } finally { app.unmount(); }
   }
@@ -344,18 +667,18 @@ test('worker receipt confirmation unlocks checkout validation without exposing t
   const app = mount(context({ phase: 'receipt', paid_at: '2026-10-18T02:00:00Z' }));
   try {
     await app.flush();
-    assert.doesNotMatch(app.html(), /Validar Checkout/);
+    assert.doesNotMatch(app.html(), /Realizar Checkout/);
     app.db.value = context({ phase: 'payment_disputed', paid_at: '2026-10-18T02:00:00Z' });
     app.button('Não Recebi').props.onClick();
     await app.flush();
     assert.match(app.html(), /checkout permanece bloqueado/);
-    assert.doesNotMatch(app.html(), /Validar Checkout/);
+    assert.doesNotMatch(app.html(), /Realizar Checkout/);
     app.db.value = context({ phase: 'checkout', receipt_confirmed_at: '2026-10-18T02:05:00Z', has_code: true });
-    app.button('Recebi').props.onClick();
+    app.button('Confirmar Recebimento').props.onClick();
     await app.flush();
     assert.equal(app.db.gpsCalls, 0);
     assert.match(app.html(), /Recebimento confirmado. Checkout liberado/);
-    assert.match(app.html(), /Validar Checkout/);
+    assert.match(app.html(), /Realizar Checkout/);
     assert.doesNotMatch(app.html(), /Gerar código de Checkout/);
   } finally { app.unmount(); }
 });
@@ -365,7 +688,7 @@ test('interrupted work has a return path but no unauthorized chat or active oper
   try {
     await app.flush();
     assert.match(app.html(), /href="\/worker\/applications"/);
-    assert.doesNotMatch(app.html(), /href="\/chat\/job"|Realizar Check-in|Confirmar Pagamento|Validar Checkout/);
+    assert.doesNotMatch(app.html(), /href="\/chat\/job"|Realizar Check-in|Confirmar Pagamento|Realizar Checkout/);
   } finally { app.unmount(); }
 });
 
@@ -470,7 +793,7 @@ test('operation publication uses the primary operational location without typing
     assert.match(html, /Matriz \(principal\)/);
     assert.match(html, /Rua das Flores, 120 · Centro · São Paulo\/SP · CEP 01001-000/);
     assert.doesNotMatch(html, /Sem confirmação<\/option>|Arquivado<\/option>/);
-    assert.match(html, /1 local aguarda confirmação/);
+    assert.match(html, /1 local aguarda localização/);
     assert.match(html, /href="\/restaurant\/locations"/);
     const date = app.elements().find(node => node.type === ui.TextInput && node.props.type === 'date');
     assert.equal(date.props.value, '');
@@ -488,7 +811,7 @@ test('operation publication uses the primary operational location without typing
   } finally { app.unmount(); }
 });
 
-test('publication errors remain visible and never publish without a confirmed location', async () => {
+test('publication errors remain visible and publication requires operational coordinates', async () => {
   const app = mount(null, '../app/restaurant/dashboard/jobs/create/page.tsx');
   app.db.rpcError = { message: 'Confirme a localização do local antes de publicar a operação.' };
   try {
@@ -506,17 +829,17 @@ test('publication errors remain visible and never publish without a confirmed lo
   empty.db.locations = [primaryLocation({ geocoding_status: 'failed', latitude: null, longitude: null })];
   try {
     await empty.flush();
-    assert.match(empty.html(), /Nenhum local confirmado disponível/);
+    assert.match(empty.html(), /Nenhum local com coordenadas operacionais disponível/);
     fillOperation(empty);
     await empty.flush();
-    assert.match(empty.html(), /Nenhum local confirmado disponível para esta data/);
+    assert.match(empty.html(), /Nenhum local com coordenadas operacionais disponível para esta data/);
     await submitOperation(empty);
-    assert.match(empty.html(), /Selecione um local operacional confirmado antes de publicar/);
+    assert.match(empty.html(), /Selecione um local com coordenadas operacionais antes de publicar/);
     assert.equal(empty.db.calls.some(call => call.name === 'create_restaurant_demand'), false);
   } finally { empty.unmount(); }
 });
 
-test('a new or one-off location is registered inline and selected once confirmed', async () => {
+test('a new or one-off location is selected inline as soon as it has operational coordinates', async () => {
   const app = mount('published-demand', '../app/restaurant/dashboard/jobs/create/page.tsx');
   app.db.locations = [];
   try {
@@ -530,11 +853,14 @@ test('a new or one-off location is registered inline and selected once confirmed
     assert.equal(form.props.temporaryUntil, '2099-01-01');
     assert.equal(form.props.allowTemporary, true);
     assert.equal(form.props.makeDefault, true, 'first location becomes the primary address');
-    form.props.onSaved(primaryLocation({ id: 'event-hall', is_default: false, kind: 'temporary', valid_until: '2099-01-01', geocoding_status: 'needs_review' }));
+    form.props.onSaved(primaryLocation({ id: 'event-hall', is_default: false, kind: 'temporary', valid_until: '2099-01-01',
+      geocoding_status: 'needs_review', geocoding_precision: null, latitude: null, longitude: null }));
     await app.flush();
-    assert.ok(app.elements().find(node => node.type === LocationFormStub), 'form stays open until the position is confirmed');
+    assert.ok(app.elements().find(node => node.type === LocationFormStub), 'form stays open while coordinates are pending');
     app.elements().find(node => node.type === LocationFormStub).props.onSaved(primaryLocation({
       id: 'event-hall', name: 'Salão de festas', is_default: false, kind: 'temporary', valid_until: '2099-01-01', revision: 5,
+      geocoding_status: 'needs_review', geocoding_precision: 'street', latitude: null, longitude: null,
+      candidate_latitude: -23.5, candidate_longitude: -46.6,
     }));
     await app.flush();
     assert.equal(app.elements().find(node => node.type === LocationFormStub), undefined);
@@ -542,7 +868,7 @@ test('a new or one-off location is registered inline and selected once confirmed
     assert.match(app.html(), /Salão de festas \(temporário\)/);
     app.elements().find(node => node.props.id === 'operation-date').props.onChange({ target: { value: '2099-01-02' } });
     await app.flush();
-    assert.match(app.html(), /Nenhum local confirmado disponível para esta data/, 'temporary locations expire after their date');
+    assert.match(app.html(), /Nenhum local com coordenadas operacionais disponível para esta data/, 'temporary locations expire after their date');
     app.elements().find(node => node.props.id === 'operation-date').props.onChange({ target: { value: '2099-01-01' } });
     await app.flush();
     await submitOperation(app);
@@ -555,7 +881,8 @@ test('locations page manages primary, temporary and archived locations through c
   const app = mount(null, '../app/restaurant/locations/page.tsx');
   app.db.locations = [
     primaryLocation(),
-    primaryLocation({ id: 'branch', name: 'Filial', is_default: false, geocoding_status: 'needs_review', latitude: null, longitude: null }),
+    primaryLocation({ id: 'branch', name: 'Filial', is_default: false, geocoding_status: 'needs_review',
+      geocoding_precision: 'street', latitude: null, longitude: null, candidate_latitude: -23.5, candidate_longitude: -46.6 }),
     primaryLocation({ id: 'hall', name: 'Salão', is_default: false, kind: 'temporary', valid_until: '2099-01-01' }),
     primaryLocation({ id: 'legacy', name: 'Antigo', is_default: false, postal_code: '', geocoding_status: 'pending', latitude: null, longitude: null }),
     primaryLocation({ id: 'old', name: 'Arquivado', is_default: false, archived_at: '2026-01-02T00:00:00Z' }),
@@ -566,7 +893,7 @@ test('locations page manages primary, temporary and archived locations through c
     assert.match(html, /Locais operacionais/);
     assert.match(html, /Principal/);
     assert.match(html, /Temporário até 01\/01\/2099/);
-    assert.match(html, /Confirme a posição exata/);
+    assert.match(html, /Endereço aproximado · raio de 300 m/);
     assert.match(html, /Completar endereço \(CEP\)/, 'legacy rows without CEP must be completed before use');
     assert.doesNotMatch(html, /Arquivado<\/h2>/);
     assert.equal(app.elements().filter(node => node.type === ui.Button && node.props.children === 'Tornar principal').length, 2,
@@ -576,9 +903,7 @@ test('locations page manages primary, temporary and archived locations through c
     assert.deepEqual(app.db.calls.at(-1), { name: 'manage_work_location', args: { id: 'branch', action: 'set_default' } });
     assert.match(app.html(), /Endereço principal atualizado/);
     assert.equal(app.db.locationLoads.length, 2, 'catalog reloads after each change');
-    app.button('Confirmar no local (GPS)').props.onClick();
-    await app.flush();
-    assert.deepEqual(app.db.calls.at(-1), { name: 'confirm_work_location', args: { id: 'branch', method: 'device' } });
+    assert.doesNotMatch(html, /Confirmar no local \(GPS\)/);
     app.button('Ver arquivados (1)').props.onClick();
     await app.flush();
     app.button('Restaurar').props.onClick();
