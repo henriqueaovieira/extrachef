@@ -150,34 +150,45 @@ export class PhotonProvider implements GeocodingProvider {
     if (!address.number.trim() || !states[address.state]) {
       throw new GeocodingError('invalid_address', 'Informe o número do endereço e uma UF válida para localizar a operação.', 422);
     }
+    // The CEP stays out of the query: OSM often stores only the city-wide CEP and Photon then returns nothing.
     const results = await this.search('api', {
-      q: [address.address, address.number, address.neighborhood, address.city, states[address.state],
-        address.postal_code, 'Brasil'].filter(Boolean).join(', '),
+      q: [address.address, address.number, address.neighborhood, address.city, states[address.state], 'Brasil']
+        .filter(Boolean).join(', '),
       limit: '5', lang: LANGUAGE,
     });
     const street = comparableStreet(address.address);
     const number = comparableNumber(address.number);
     const postalCode = address.postal_code.replace(/\D/g, '');
-    // OSM often stores the city-wide CEP (e.g. 13520-000); then only the 5-digit region must agree.
+    // The CEP only raises confidence; street, city and UF are the eliminatory criteria.
     const postalMatches = (value: string) => {
       const returned = value.replace(/\D/g, '');
-      if (!postalCode || returned.length !== 8) return true;
+      if (!postalCode || returned.length !== 8) return false;
+      // OSM often stores the city-wide CEP (e.g. 13520-000); then the 5-digit region is enough.
       return returned.endsWith('000') ? returned.slice(0, 5) === postalCode.slice(0, 5) : returned === postalCode;
+    };
+    const preferPostal = (list: PhotonResult[]) => {
+      const confirmed = list.filter(result => postalMatches(result.address.postal_code));
+      return confirmed.length ? confirmed : list;
     };
     const candidates = results.filter(result =>
       comparable(result.address.city) === comparable(address.city)
       && result.address.state === address.state
-      && street !== '' && comparableStreet(result.address.address) === street
-      && postalMatches(result.address.postal_code));
+      && street !== '' && comparableStreet(result.address.address) === street);
     // A returned house number must match; results without one are street-level fallbacks.
-    const houses = candidates.filter(result => comparableNumber(result.address.number) === number);
-    const streets = candidates.filter(result => !result.address.number);
+    const houses = preferPostal(candidates.filter(result => comparableNumber(result.address.number) === number));
+    const streets = preferPostal(candidates.filter(result => !result.address.number));
     const [matches, tolerance] = houses.length
       ? [houses, HOUSE_TOLERANCE_METERS] : [streets, STREET_TOLERANCE_METERS];
     if (!matches.length) {
       throw new GeocodingError('not_found', 'Não foi possível localizar o endereço completo com precisão. Confira rua, número, cidade e UF.', 422);
     }
     const first = matches[0];
+    if (postalCode && !postalMatches(first.address.postal_code)) {
+      console.warn('geocoding_provider', {
+        provider: this.name, event: 'provider_postal_mismatch',
+        expectedPostalCode: postalCode, returnedPostalCode: first.address.postal_code.replace(/\D/g, '') || null,
+      });
+    }
     if (matches.some(result => distanceMeters(first.latitude, first.longitude, result.latitude, result.longitude) > tolerance)) {
       throw new GeocodingError('ambiguous', 'O endereço possui resultados diferentes. Confira os dados antes de publicar.', 422);
     }

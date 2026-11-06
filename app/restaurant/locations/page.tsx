@@ -6,8 +6,10 @@ import LocationForm from '@/app/components/location-form';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { Badge, Button, Card, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
 import { createClient } from '@/lib/supabase/client';
-import { confirmLocation, loadWorkLocations, manageLocation, retryLocation } from '@/lib/locations/client';
-import { formatLocationAddress, locationStatusLabel, type CatalogLocation } from '@/lib/work-locations';
+import { loadWorkLocations, manageLocation, retryLocation } from '@/lib/locations/client';
+import {
+  formatLocationAddress, locationHasOperationalCoordinates, locationStatusLabel, type CatalogLocation,
+} from '@/lib/work-locations';
 
 export default function RestaurantLocationsPage() {
   const [supabase] = useState(() => createClient());
@@ -87,22 +89,12 @@ export default function RestaurantLocationsPage() {
                   <h2 className="font-semibold text-gray-900">{location.name}</h2>
                   {location.is_default && <Badge tone="success">Principal</Badge>}
                   {location.kind === 'temporary' && <Badge>Temporário até {location.valid_until?.split('-').reverse().join('/')}</Badge>}
-                  <Badge tone={location.geocoding_status === 'resolved' ? 'success' : location.geocoding_status === 'needs_review' ? 'warning' : 'danger'}>
+                  <Badge tone={locationHasOperationalCoordinates(location) ? 'success' : location.geocoding_status === 'failed' ? 'danger' : 'warning'}>
                     {locationStatusLabel(location)}
                   </Badge>
                 </div>
                 <p className="text-sm text-gray-600">{formatLocationAddress(location)}</p>
                 <div className="flex flex-wrap gap-2">
-                  {location.geocoding_status === 'needs_review' && <>
-                    <Button variant="primary" disabled={Boolean(busyId)} busy={busyId === location.id}
-                      onClick={() => { void run(location, () => confirmLocation(supabase, location, 'device'), 'Posição confirmada pelo GPS.'); }}>
-                      Confirmar no local (GPS)
-                    </Button>
-                    <Button disabled={Boolean(busyId)}
-                      onClick={() => { void run(location, () => confirmLocation(supabase, location, 'approximate'), 'Localização aproximada confirmada.'); }}>
-                      Usar localização aproximada
-                    </Button>
-                  </>}
                   {(location.geocoding_status === 'failed' || location.geocoding_status === 'pending') && location.postal_code && (
                     <Button disabled={Boolean(busyId)} onClick={() => { void run(location, async () => {
                       const result = await retryLocation(location.id);

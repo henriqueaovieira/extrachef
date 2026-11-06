@@ -210,7 +210,7 @@ test('postal-code lookup fills the form only, through an authenticated ViaCEP-co
 });
 
 test('shared location helpers enforce CEP, primary and temporary validity rules', () => {
-  const { validateLocationInput, locationSelectable, formatLocationAddress, todayInSaoPaulo } = workLocations;
+  const { validateLocationInput, locationSelectable, locationStatusLabel, formatLocationAddress, todayInSaoPaulo } = workLocations;
   const valid = { ...input(), state: 'SP' };
   assert.doesNotThrow(() => validateLocationInput(valid));
   assert.throws(() => validateLocationInput({ ...valid, postal_code: '01001-00' }), /CEP/);
@@ -219,9 +219,20 @@ test('shared location helpers enforce CEP, primary and temporary validity rules'
   assert.throws(() => validateLocationInput({ ...valid, kind: 'temporary', valid_until: '2099-01-01' }), /principal/);
   assert.throws(() => validateLocationInput({ ...valid, valid_until: '2099-01-01' }), /temporários/);
   assert.equal(todayInSaoPaulo(new Date('2026-01-01T02:00:00Z')), '2025-12-31');
-  const resolved = row({ geocoding_status: 'resolved' });
+  const resolved = row({ geocoding_status: 'resolved', geocoding_precision: 'device', latitude: -23.5,
+    longitude: -46.6, confirmed_at: '2026-01-01T00:00:00Z' });
   assert.equal(locationSelectable(resolved, '2099-01-01', '2026-01-01'), true);
   assert.equal(locationSelectable(row({ geocoding_status: 'needs_review' }), '', '2026-01-01'), false);
+  assert.equal(locationSelectable(row({ geocoding_status: 'needs_review', geocoding_precision: 'street',
+    candidate_latitude: -23.5, candidate_longitude: -46.6 }), '', '2026-01-01'), true);
+  assert.equal(locationSelectable(row({ geocoding_status: 'resolved', geocoding_precision: 'street',
+    latitude: -23.5, longitude: -46.6 }), '', '2026-01-01'), true);
+  assert.equal(locationSelectable(row({ geocoding_status: 'resolved', geocoding_precision: 'house',
+    latitude: -23.5, longitude: -46.6 }), '', '2026-01-01'), true);
+  const houseCandidate = row({ geocoding_status: 'needs_review', geocoding_precision: 'house',
+    candidate_latitude: -23.5, candidate_longitude: -46.6 });
+  assert.equal(locationSelectable(houseCandidate, '', '2026-01-01'), true);
+  assert.equal(locationStatusLabel(houseCandidate), 'Endereço localizado · raio de 100 m');
   assert.equal(locationSelectable({ ...resolved, archived_at: 'x' }, '', '2026-01-01'), false);
   const temporary = { ...resolved, kind: 'temporary', valid_until: '2026-02-01' };
   assert.equal(locationSelectable(temporary, '2026-02-01', '2026-01-01'), true);

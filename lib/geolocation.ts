@@ -2,28 +2,35 @@ export interface DeviceCoordinates {
   latitude: number;
   longitude: number;
   accuracy: number;
+  speed: number | null;
+  isMock: boolean;
 }
 
 export function getDeviceCoordinates(): Promise<DeviceCoordinates> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('Este navegador não oferece acesso à localização.'));
+      reject(new Error('Ative sua localização para registrar presença.'));
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => resolve({
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        accuracy: coords.accuracy,
-      }),
+      ({ coords }) => {
+        const deviceCoords = coords as GeolocationCoordinates & { isMock?: boolean };
+        resolve({
+          latitude: deviceCoords.latitude,
+          longitude: deviceCoords.longitude,
+          accuracy: deviceCoords.accuracy,
+          speed: deviceCoords.speed,
+          isMock: deviceCoords.isMock === true,
+        });
+      },
       (error) => {
         if (error.code === error.PERMISSION_DENIED) {
-          reject(new Error('Permita o acesso à localização para utilizar este recurso.'));
+          reject(new Error('Ative sua localização para registrar presença.'));
         } else if (error.code === error.TIMEOUT) {
-          reject(new Error('Não foi possível obter sua localização a tempo. Tente novamente.'));
+          reject(new Error('Aguardando uma localização mais precisa. Tente novamente em alguns segundos.'));
         } else {
-          reject(new Error('Não foi possível obter sua localização. Verifique o GPS e tente novamente.'));
+          reject(new Error('Aguardando uma localização mais precisa. Tente novamente em alguns segundos.'));
         }
       },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },

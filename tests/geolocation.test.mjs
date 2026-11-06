@@ -31,18 +31,20 @@ test('device GPS is a fresh one-shot request and reports permission, timeout and
     if (previous) Object.defineProperty(globalThis, 'navigator', previous);
     else delete globalThis.navigator;
   });
-  await assert.rejects(device.getDeviceCoordinates(), /não oferece acesso/);
+  await assert.rejects(device.getDeviceCoordinates(), /Ative sua localização/);
   let requests = 0;
   navigator.geolocation = {
     getCurrentPosition(success, failure, options) {
       requests++;
       assert.deepEqual(options, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
-      success({ coords: { latitude: -23.5, longitude: -46.6, accuracy: 10 } });
+      success({ coords: { latitude: -23.5, longitude: -46.6, accuracy: 10, speed: null } });
     },
   };
-  assert.deepEqual(await device.getDeviceCoordinates(), { latitude: -23.5, longitude: -46.6, accuracy: 10 });
+  assert.deepEqual(await device.getDeviceCoordinates(), {
+    latitude: -23.5, longitude: -46.6, accuracy: 10, speed: null, isMock: false,
+  });
   assert.equal(requests, 1);
-  for (const [code, message] of [[1, /Permita o acesso/], [2, /Verifique o GPS/], [3, /a tempo/]]) {
+  for (const [code, message] of [[1, /Ative sua localização/], [2, /Aguardando uma localização mais precisa/], [3, /Aguardando uma localização mais precisa/]]) {
     navigator.geolocation.getCurrentPosition = (success, failure) =>
       failure({ code, PERMISSION_DENIED: 1, TIMEOUT: 3 });
     await assert.rejects(device.getDeviceCoordinates(), message);

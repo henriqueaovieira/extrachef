@@ -14,13 +14,17 @@ Cadastro (`/restaurant/locations` ou "+ Novo local" em Nova Operacao):
    papel e conta ativa e chama `save_restaurant_location` com a sessao do
    usuario. O navegador nunca envia coordenadas.
 3. O servidor geocodifica o endereco SALVO via `lib/geocoding` (cache
-   persistente, reserva distribuida, adapter Photon com validacao de pais, UF,
-   municipio, rua, numero e CEP; CEP generico `xxxxx-000` compara 5 digitos).
+   persistente, reserva distribuida, adapter Photon com validacao eliminatoria
+   de pais, UF, municipio, rua e numero). O CEP nao entra na consulta enviada
+   ao Photon e nao elimina resultados: apenas prioriza o resultado com CEP
+   coincidente (CEP generico `xxxxx-000` compara 5 digitos); divergencia gera
+   o log `provider_postal_mismatch`.
 4. `apply_work_location_geocode` copia as coordenadas do cache server-only:
-   - numero encontrado: `resolved`, precisao `house`;
-   - somente rua: `needs_review` com coordenada candidata. O restaurante
-     confirma no local (GPS, precisao <= 50 m e ate 1 km do candidato) ou aceita
-     explicitamente a posicao aproximada (`confirm_work_location`).
+   - numero encontrado: `needs_review`, precisao `house`, com coordenada candidata;
+   - somente rua: `needs_review`, precisao `street`, com coordenada candidata.
+   Nenhum resultado do geocodificador e considerado confirmacao presencial.
+   O restaurante confirma no local pelo GPS (precisao <= 50 m e ate 1 km do
+   candidato) via `confirm_work_location`.
 5. Falhas definitivas (`not_found`, `ambiguous`, `invalid_address`) gravam
    `failed` via `record_work_location_geocoding_failure`; falhas transitorias
    mantem `pending` para nova tentativa (`PATCH` com `action: 'locate'`).
@@ -29,8 +33,11 @@ Cadastro (`/restaurant/locations` ou "+ Novo local" em Nova Operacao):
 
 Publicacao e operacao:
 
-7. `create_restaurant_demand` aceita apenas local ativo, `resolved` e, se
-   temporario, valido na data da operacao; o job recebe snapshot `ready`.
+7. `create_restaurant_demand` aceita apenas local ativo com status `resolved`,
+   precisao `device`, origem manual e `confirmed_at`; se temporario, tambem
+   valido na data da operacao. Eventos tambem exigem snapshot atualizado do
+   mesmo local confirmado. Origens sem local presencialmente confirmado sao
+   recusadas. O job recebe snapshot `ready`.
 8. Recrutamento, candidatura, convite, contratacao e substituicao exigem prontidao.
 9. GPS e `issue_operational_code` preservam raio de 100 m, participante atual,
    validacao bilateral, pagamento e checkout.
@@ -49,6 +56,9 @@ centro de cidade/CEP, GPS do publicador ou outro fornecedor.
    frontend novo (a partir dela o fluxo antigo exige CEP).
 2. `20261105010000_revoke_client_geocoded_locations.sql` apos o frontend novo
    estar ativo: revoga `save_geocoded_work_location` de clientes.
+3. `20261105020000_require_onsite_work_location_confirmation.sql` torna
+   coordenadas geocodificadas candidatas e exige confirmacao presencial para
+   publicar novas operacoes. Nao altera locais nem operacoes existentes.
 ## Configuracao server-only
 
 ```dotenv
