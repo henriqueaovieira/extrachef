@@ -48,14 +48,31 @@ export default function WorkerMessagesPage() {
 
         const userId = authData.user.id;
         const [profileResult, photoResult, applicationsResult] = await Promise.all([
-          supabase.from('public_user_directory').select('name').eq('id', userId).single(),
-          supabase.from('worker_profiles').select('profile_photo_path').eq('user_id', userId).maybeSingle(),
-          supabase.from('applications')
-            .select('job_id, job:jobs(title, job_date, start_time, restaurant:users!restaurant_id(name))')
-            .eq('worker_id', userId)
-            .eq('status', 'approved')
-            .order('created_at', { ascending: false }),
-        ]);
+  supabase
+    .from('public_user_directory')
+    .select('name')
+    .eq('id', userId)
+    .single(),
+
+  supabase
+    .from('worker_profiles')
+    .select('profile_photo_path')
+    .eq('user_id', userId)
+    .maybeSingle(),
+
+  supabase
+    .from('applications')
+    .select(
+      'job_id, job:jobs(title, job_date, start_time, restaurant:users!restaurant_id(name))'
+    )
+    .eq('worker_id', userId)
+    .in('status', [
+      'approved',
+      'in_progress',
+      'completed',
+    ])
+    .order('created_at', { ascending: false }),
+]);
 
         if (!active) return;
         if (profileResult.error) console.error('Worker profile lookup failed.', profileResult.error);

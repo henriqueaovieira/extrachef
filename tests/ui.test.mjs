@@ -519,23 +519,63 @@ test('worker applications screen reuses shared identity, aligned containers and 
   assert.doesNotMatch(navigation, /worker\/applications#chats/);
 });
 
-test('worker messages index links only approved applications with existing messages to the existing chat', () => {
-  const messages = readFileSync(new URL('../app/worker/messages/page.tsx', import.meta.url), 'utf8');
-  assert.match(messages, /\.eq\('status', 'approved'\)/);
-  assert.match(messages, /\.from\('messages'\)/);
-  assert.match(messages, /\.eq\('job_id', item\.job_id\)/);
-  assert.match(messages, /return data \? \{ item, message: data \} : null/);
-  assert.match(messages, /href=\{`\/chat\/\$\{conversation\.job_id\}`\}/);
-  assert.match(messages, /Ainda não existem conversas\./);
-  assert.match(messages, /As mensagens das operações aparecerão aqui\./);
-  assert.match(messages, /DashboardLogo role="worker"/);
-  assert.match(messages, /DashboardAvatar/);
-  assert.match(messages, /DashboardNav role="worker" showOnDesktop/);
-  assert.doesNotMatch(messages, /rpc\(|\.insert\(|\.update\(/);
-  const navigation = readFileSync(new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url), 'utf8');
-  assert.match(navigation, /href: '\/worker\/messages'/);
-  assert.doesNotMatch(navigation, /worker\/applications#chats/);
-});
+test(
+  'worker messages index includes contracted operations across the full lifecycle',
+  () => {
+    const messages = readFileSync(
+      new URL('../app/worker/messages/page.tsx', import.meta.url),
+      'utf8',
+    );
+
+    assert.match(messages, /\.in\('status'/);
+
+    assert.match(messages, /approved/);
+    assert.match(messages, /in_progress/);
+    assert.match(messages, /completed/);
+
+assert.doesNotMatch(
+  messages,
+  /\.eq\('status',\s*'approved'\)/
+);
+
+    assert.doesNotMatch(
+      messages,
+      /\.eq\('status',\s*'approved'\)/
+    );
+
+    assert.match(messages, /\.from\('messages'\)/);
+    assert.match(messages, /\.eq\('job_id', item\.job_id\)/);
+    assert.match(messages, /return data \? \{ item, message: data \} : null/);
+    assert.match(messages, /href=\{`\/chat\/\$\{conversation\.job_id\}`\}/);
+
+    assert.match(messages, /Ainda não existem conversas\./);
+    assert.match(messages, /As mensagens das operações aparecerão aqui\./);
+
+    assert.match(messages, /DashboardLogo role="worker"/);
+    assert.match(messages, /DashboardAvatar/);
+    assert.match(messages, /DashboardNav role="worker" showOnDesktop/);
+
+    assert.doesNotMatch(
+      messages,
+      /rpc\(|\.insert\(|\.update\(/
+    );
+
+    const navigation = readFileSync(
+      new URL('../app/components/mobile-bottom-nav.tsx', import.meta.url),
+      'utf8',
+    );
+
+    assert.match(
+      navigation,
+      /href: '\/worker\/messages'/
+    );
+
+    assert.doesNotMatch(
+      navigation,
+      /worker\/applications#chats/
+    );
+  },
+);
 
 test('worker monthly earnings are limited to completed, confirmed payments in the current local month', () => {
   const migration = readFileSync(new URL('../supabase/migrations/20261019020000_worker_monthly_paid_earnings.sql', import.meta.url), 'utf8');
