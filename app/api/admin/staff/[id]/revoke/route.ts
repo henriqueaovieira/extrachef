@@ -1,9 +1,28 @@
 import type { NextRequest } from 'next/server';
+import { requirePermission } from '@/lib/auth/admin-guards';
+import type { StaffPermission } from '@/lib/auth/staff-permissions';
 import { authorizeStaffApi, hasSameOrigin, isUuid, parseStaffReason, rpcErrorStatus } from '@/lib/auth/staff-api';
 
+function permissionErrorResponse(
+  context: Extract<Awaited<ReturnType<typeof authorizeStaffApi>>, { ok: true }>,
+  permission: StaffPermission,
+) {
+  try {
+    requirePermission({ role: context.role, status: 'active' }, permission);
+    return null;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'STAFF_PERMISSION_DENIED') {
+      return context.reply({ error: 'Acesso administrativo não autorizado.' }, 403);
+    }
+    throw error;
+  }
+}
+
 export async function POST(request: NextRequest, context: RouteContext<'/api/admin/staff/[id]/revoke'>) {
-  const authorization = await authorizeStaffApi(request, ['admin']);
+  const authorization = await authorizeStaffApi(request);
   if (!authorization.ok) return authorization.response;
+  const denied = permissionErrorResponse(authorization, 'staff.manage');
+  if (denied) return denied;
   if (!hasSameOrigin(request)) return authorization.reply({ error: 'Origem da solicitação inválida.' }, 403);
 
   const { id } = await context.params;

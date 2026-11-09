@@ -184,6 +184,12 @@ test('admin paths deny non-staff and fail closed when staff authorization is una
   );
   assert.equal(denied.status, 403);
 
+  const inactive = await proxyWith({
+    user: { id: 'former-staff-user' },
+    staffMembership: { role: 'admin', status: 'revoked' },
+  })(new NextRequest('https://app.test/admin'));
+  assert.equal(inactive.status, 403);
+
   const unavailable = await proxyWith({
     user: { id: 'staff-user' },
     staffError: { code: 'unavailable' },

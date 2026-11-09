@@ -6,6 +6,8 @@ interface LoginCase {
   password?: string;
   expectedStatus: number;
   expectedRole?: string;
+  visibleLinks?: string[];
+  hiddenLinks?: string[];
 }
 
 const cases: LoginCase[] = [
@@ -27,6 +29,25 @@ const cases: LoginCase[] = [
     password: process.env.PLAYWRIGHT_ADMIN_PASSWORD,
     expectedStatus: 200,
     expectedRole: 'admin',
+    visibleLinks: ['Dashboard', 'Staff', 'Users', 'Verification', 'Audit', 'Settings'],
+  },
+  {
+    label: 'Reviewer',
+    email: process.env.PLAYWRIGHT_REVIEWER_EMAIL,
+    password: process.env.PLAYWRIGHT_REVIEWER_PASSWORD,
+    expectedStatus: 200,
+    expectedRole: 'reviewer',
+    visibleLinks: ['Dashboard', 'Users', 'Verification'],
+    hiddenLinks: ['Staff', 'Audit', 'Settings'],
+  },
+  {
+    label: 'Support',
+    email: process.env.PLAYWRIGHT_SUPPORT_EMAIL,
+    password: process.env.PLAYWRIGHT_SUPPORT_PASSWORD,
+    expectedStatus: 200,
+    expectedRole: 'support',
+    visibleLinks: ['Dashboard', 'Users', 'Verification'],
+    hiddenLinks: ['Staff', 'Audit', 'Settings'],
   },
 ];
 
@@ -47,6 +68,14 @@ for (const login of cases) {
       if (login.expectedStatus === 200) {
         await expect(page.getByRole('heading', { name: 'Admin Area' })).toBeVisible();
         await expect(page.getByText(login.expectedRole!, { exact: true })).toBeVisible();
+        for (const label of login.visibleLinks ?? []) {
+          await expect(page.getByRole('navigation', { name: 'Navegação administrativa' })
+            .getByRole('link', { name: label, exact: true })).toBeVisible();
+        }
+        for (const label of login.hiddenLinks ?? []) {
+          await expect(page.getByRole('navigation', { name: 'Navegação administrativa' })
+            .getByRole('link', { name: label, exact: true })).toHaveCount(0);
+        }
         const access = await page.request.get('/api/admin/staff/me');
         expect(access.status()).toBe(200);
         expect(await access.json()).toMatchObject({ role: login.expectedRole, status: 'active' });

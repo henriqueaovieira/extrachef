@@ -1,12 +1,31 @@
 import type { NextRequest } from 'next/server';
+import { requirePermission } from '@/lib/auth/admin-guards';
+import type { StaffPermission } from '@/lib/auth/staff-permissions';
 import { authorizeStaffApi, hasSameOrigin, isUuid, parseStaffReason, rpcErrorStatus } from '@/lib/auth/staff-api';
 import type { StaffRole } from '@/lib/auth/staff-access';
 
 const staffRoles: StaffRole[] = ['admin', 'reviewer', 'support'];
 
+function permissionErrorResponse(
+  context: Extract<Awaited<ReturnType<typeof authorizeStaffApi>>, { ok: true }>,
+  permission: StaffPermission,
+) {
+  try {
+    requirePermission({ role: context.role, status: 'active' }, permission);
+    return null;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'STAFF_PERMISSION_DENIED') {
+      return context.reply({ error: 'Acesso administrativo não autorizado.' }, 403);
+    }
+    throw error;
+  }
+}
+
 export async function GET(request: NextRequest) {
-  const context = await authorizeStaffApi(request, ['admin']);
+  const context = await authorizeStaffApi(request);
   if (!context.ok) return context.response;
+  const denied = permissionErrorResponse(context, 'staff.view');
+  if (denied) return denied;
 
   const limitValue = Number(request.nextUrl.searchParams.get('limit') ?? 50);
   const offsetValue = Number(request.nextUrl.searchParams.get('offset') ?? 0);
@@ -24,8 +43,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const context = await authorizeStaffApi(request, ['admin']);
+  const context = await authorizeStaffApi(request);
   if (!context.ok) return context.response;
+  const denied = permissionErrorResponse(context, 'staff.manage');
+  if (denied) return denied;
   if (!hasSameOrigin(request)) return context.reply({ error: 'Origem da solicitação inválida.' }, 403);
 
   let body: unknown;

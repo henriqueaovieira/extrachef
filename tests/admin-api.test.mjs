@@ -42,6 +42,16 @@ const requestClient = {
 };
 
 const staffAccess = loadTs('../lib/auth/staff-access.ts');
+const staffPermissions = loadTs('../lib/auth/staff-permissions.ts');
+const staffAuthorization = loadTs('../lib/auth/staff-authorization.ts', {
+  '@/lib/auth/staff-permissions': staffPermissions,
+  '@/lib/auth/staff-access': staffAccess,
+});
+const adminGuards = loadTs('../lib/auth/admin-guards.ts', {
+  '@/lib/auth/staff-authorization': staffAuthorization,
+  '@/lib/auth/staff-permissions': staffPermissions,
+  '@/lib/auth/staff-access': staffAccess,
+});
 const staffApi = loadTs('../lib/auth/staff-api.ts', {
   'server-only': {},
   'next/server': { ...nextServer, connection: async () => {} },
@@ -49,9 +59,15 @@ const staffApi = loadTs('../lib/auth/staff-api.ts', {
   '@/lib/supabase/request': requestClient,
 });
 const routes = {
-  ...loadTs('../app/api/admin/staff/route.ts', { '@/lib/auth/staff-api': staffApi }),
+  ...loadTs('../app/api/admin/staff/route.ts', {
+    '@/lib/auth/admin-guards': adminGuards,
+    '@/lib/auth/staff-permissions': staffPermissions,
+    '@/lib/auth/staff-api': staffApi,
+  }),
 };
 const revokeRoute = loadTs('../app/api/admin/staff/[id]/revoke/route.ts', {
+  '@/lib/auth/admin-guards': adminGuards,
+  '@/lib/auth/staff-permissions': staffPermissions,
   '@/lib/auth/staff-api': staffApi,
 });
 const url = 'https://app.test/api/admin/staff';
@@ -79,8 +95,27 @@ test('staff API requires authentication and active authorized membership', async
   state.membership = null;
   assert.equal((await routes.GET(new NextRequest(url))).status, 403);
 
+  state.membership = { role: 'support', status: 'disabled' };
+  assert.equal((await routes.GET(new NextRequest(url))).status, 403);
+
   state.membership = { role: 'reviewer', status: 'active' };
   assert.equal((await routes.GET(new NextRequest(url))).status, 403);
+});
+
+test('permission matrix grants only the declared role permissions', () => {
+  const { getStaffPermissions, hasPermission } = staffAuthorization;
+  for (const [role, allowed, denied] of [
+    ['admin', ['staff.view', 'staff.manage'], []],
+    ['reviewer', ['verification.view'], ['staff.manage', 'staff.view']],
+    ['support', ['verification.view'], ['staff.manage', 'staff.view']],
+  ]) {
+    const membership = { role, status: 'active' };
+    for (const permission of allowed) assert.equal(hasPermission(membership, permission), true);
+    for (const permission of denied) assert.equal(hasPermission(membership, permission), false);
+    assert.deepEqual(getStaffPermissions(membership).filter((permission) => (
+      permission === 'staff.view' || permission === 'staff.manage'
+    )).sort(), role === 'admin' ? ['staff.manage', 'staff.view'] : []);
+  }
 });
 
 test('staff self endpoint returns only the current membership', async () => {
@@ -120,6 +155,29 @@ test('admin can list members through bounded pagination RPC', async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(await json(response), { staff: [{ user_id: 'target', staff_role: 'reviewer' }] });
   assert.deepEqual(state.calls.at(-1), ['list_staff_members', { p_limit: 100, p_offset: 0 }]);
+});
+
+test('Reviewer and Support cannot list, grant, or revoke Staff through the APIs', async () => {
+  const target = 'https://app.test/api/admin/staff/00000000-0000-4000-8000-000000000002/revoke';
+  for (const role of ['reviewer', 'support']) {
+    state.membership = { role, status: 'active' };
+    state.calls = [];
+
+    assert.equal((await routes.GET(new NextRequest(url))).status, 403);
+    assert.equal((await routes.POST(jsonRequest(url, 'POST', {
+      user_id: '00000000-0000-4000-8000-000000000002',
+      staff_role: 'reviewer',
+      reason: 'Must be denied',
+    }))).status, 403);
+    assert.equal((await revokeRoute.POST(
+      jsonRequest(target, 'POST', { reason: 'Must be denied' }),
+      { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000002' }) },
+    )).status, 403);
+
+    assert.equal(state.calls.some(([name]) => (
+      name === 'list_staff_members' || name === 'grant_staff_role' || name === 'revoke_staff_role'
+    )), false);
+  }
 });
 
 test('staff grant validates origin, target, role and reason before invoking the RPC', async () => {
@@ -163,7 +221,20 @@ test('revocation route validates membership, UUID, origin and reason', async () 
     p_reason: 'Role no longer required',
   }]);
 
+  state.membership = { role: 'reviewer', status: 'active' };
+  const reviewerDenied = await revokeRoute.POST(
+    jsonRequest(target, 'POST', { reason: 'Reviewer cannot revoke' }),
+    { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000002' }) },
+  );
+  assert.equal(reviewerDenied.status, 403);
+
   state.membership = { role: 'support', status: 'active' };
+  const supportDenied = await revokeRoute.POST(
+    jsonRequest(target, 'POST', { reason: 'Support cannot revoke' }),
+    { params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000002' }) },
+  );
+  assert.equal(supportDenied.status, 403);
+
   const denied = await routes.POST(jsonRequest(url, 'POST', {
     user_id: '00000000-0000-4000-8000-000000000002',
     staff_role: 'reviewer',
