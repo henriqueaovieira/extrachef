@@ -1,5 +1,5 @@
 import 'server-only';
-import { NextResponse, type NextRequest } from 'next/server';
+import { connection, NextResponse, type NextRequest } from 'next/server';
 import { parseStaffMembership, type StaffRole } from '@/lib/auth/staff-access';
 import { createRequestClient } from '@/lib/supabase/request';
 
@@ -17,6 +17,7 @@ export type AuthorizedStaffRequest = {
 };
 
 export async function authorizeStaffApi(request: NextRequest, roles?: StaffRole[]): Promise<AuthorizedStaffRequest> {
+  await connection();
   const { supabase, finish } = createRequestClient(request);
   const reply: Reply = (body, status) => {
     const response = finish(NextResponse.json(body, { status }));

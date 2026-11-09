@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
-const { NextRequest } = require('next/server');
+const nextServer = require('next/server');
+const { NextRequest } = nextServer;
 
 function loadTs(relativePath, dependencies = {}) {
   const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
@@ -43,6 +44,7 @@ const requestClient = {
 const staffAccess = loadTs('../lib/auth/staff-access.ts');
 const staffApi = loadTs('../lib/auth/staff-api.ts', {
   'server-only': {},
+  'next/server': { ...nextServer, connection: async () => {} },
   '@/lib/auth/staff-access': staffAccess,
   '@/lib/supabase/request': requestClient,
 });
@@ -86,6 +88,30 @@ test('staff self endpoint returns only the current membership', async () => {
   const response = await GET(new NextRequest('https://app.test/api/admin/staff/me'));
   assert.equal(response.status, 200);
   assert.deepEqual(await json(response), { role: 'admin', status: 'active' });
+});
+
+test('staff authorization waits for a request before initializing Supabase', async () => {
+  let acceptRequest;
+  const pendingRequest = new Promise((resolve) => { acceptRequest = resolve; });
+  let clientCreated = false;
+  const { authorizeStaffApi } = loadTs('../lib/auth/staff-api.ts', {
+    'server-only': {},
+    'next/server': { ...nextServer, connection: () => pendingRequest },
+    '@/lib/auth/staff-access': staffAccess,
+    '@/lib/supabase/request': {
+      createRequestClient: () => {
+        clientCreated = true;
+        return requestClient.createRequestClient();
+      },
+    },
+  });
+
+  const authorization = authorizeStaffApi(new NextRequest(url));
+  assert.equal(clientCreated, false);
+  acceptRequest();
+  const context = await authorization;
+  assert.equal(clientCreated, true);
+  assert.equal(context.ok, true);
 });
 
 test('admin can list members through bounded pagination RPC', async () => {
