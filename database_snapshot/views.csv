@@ -1,0 +1,2 @@
+api_resource,object_type,remote_presence,evidence
+public_user_directory,unknown_relation,exposed,PostgREST OpenAPI; migration defines a view but live type not queried

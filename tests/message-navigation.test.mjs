@@ -103,3 +103,38 @@ test('only the official restaurant message route mounts the inbox and internal l
   assert.match(read('../app/components/mobile-bottom-nav.tsx'), /href: '\/restaurant\/messages', label: 'Mensagens'/);
   assert.match(read('../app/chat/[jobId]/chat-client.tsx'), /\? '\/restaurant\/messages'/);
 });
+
+test('foundation navigation retains destinations, active routes and accessible unread badge', () => {
+  const ui = load('../app/components/ui/index.tsx', {
+    '@/lib/ui/input-masks': load('../lib/ui/input-masks.ts', {}),
+  });
+  let pathname, communication;
+  const Nav = load('../app/components/mobile-bottom-nav.tsx', {
+    'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
+    'next/navigation': { usePathname: () => pathname },
+    '@/app/components/communication-state': { useCommunication: () => communication },
+    '@/app/components/ui': ui,
+  }).default;
+  const { renderToStaticMarkup } = require('react-dom/server');
+  for (const [role, route, active, activeItem] of [
+    ['worker', '/worker/dashboard', '/worker/dashboard'],
+    ['worker', '/worker/invitations', '/worker/applications'],
+    ['worker', '/settings/privacy', '/worker/profile'],
+    ['worker', '/chat/job', '/worker/messages'],
+    ['restaurant', '/restaurant/demands/job', '/restaurant/demands'],
+    ['restaurant', '/restaurant/dashboard/jobs/create', '/restaurant/demands'],
+    ['restaurant', '/restaurant/messages', '/restaurant/messages', 'Mensagens'],
+    ['restaurant', '/restaurant/candidates', '/restaurant/candidates', 'Talentos'],
+    ['restaurant', '/chat/job', '/restaurant/messages'],
+  ]) {
+    pathname = route;
+    communication = { counts: { messages: 120, notifications: 0 }, chatError: null };
+    const html = renderToStaticMarkup(React.createElement(Nav, { role, activeItem, showOnDesktop: true }));
+    assert.match(html, new RegExp(`href="${active}" aria-current="page"`), route);
+    assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
+    assert.equal((html.match(/<a /g) ?? []).length, role === 'worker' ? 4 : 6);
+    assert.match(html, /aria-label="Mensagens: 120 não lidas"/);
+    assert.match(html, /ec-mobile-nav__badge[^>]*>99\+</);
+    assert.doesNotMatch(html, /truncate/);
+  }
+});

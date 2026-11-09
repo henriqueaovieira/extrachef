@@ -8,10 +8,12 @@ import { createClient } from '@/lib/supabase/client';
 import { getAccountRole } from '@/lib/auth/account';
 import { isLoggingOut } from '@/lib/auth/logout';
 import { authMessages, canAccessPath, dashboardFor, isProtectedPath, loginHref } from '@/lib/auth/routes';
+import { isStaffPath, parseStaffMembership } from '@/lib/auth/staff-access';
 
 export default function SessionGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const protectedPage = isProtectedPath(pathname);
+  const staffPage = isStaffPath(pathname);
+  const protectedPage = isProtectedPath(pathname) || staffPage;
   const [supabase] = useState(() => createClient());
   const [verified, setVerified] = useState<{ path: string; userId: string } | null>(null);
   const [failure, setFailure] = useState<{ path: string; message: string } | null>(null);
@@ -48,6 +50,23 @@ export default function SessionGuard({ children }: { children: ReactNode }) {
         }
         if (currentUserId && currentUserId !== data.user.id) {
           window.location.reload();
+          return;
+        }
+        if (staffPage) {
+          const { data: membershipData, error: membershipError } = await supabase.rpc('get_staff_membership');
+          if (membershipError) {
+            throw new Error('Não foi possível validar seu acesso administrativo. Verifique a conexão e tente novamente.');
+          }
+          const membership = parseStaffMembership(membershipData);
+          if (!membership || membership.status !== 'active') {
+            setVerified(null);
+            setFailure({ path: pathname, message: 'Acesso administrativo não autorizado.' });
+            return;
+          }
+          currentUserId = data.user.id;
+          setFailure(null);
+          setVerified({ path: pathname, userId: data.user.id });
+          setNotice('');
           return;
         }
         const role = await getAccountRole(supabase, data.user.id);
@@ -102,7 +121,7 @@ export default function SessionGuard({ children }: { children: ReactNode }) {
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onForeground);
     };
-  }, [pathname, protectedPage, supabase]);
+  }, [pathname, protectedPage, staffPage, supabase]);
 
   if (!protectedPage) return children;
   if (failure?.path === pathname) {

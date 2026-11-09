@@ -51,13 +51,6 @@ export function ProfessionalVerificationProvider({ children }: { children: React
           .from('public_user_directory').select('id, profile_verified').in('id', batch)));
         if (!active || requestVersion !== version) return;
         const failure = results.find((result) => result.error)?.error;
-        if (failure?.code === '42703'
-          && /column ["']?(?:public_user_directory\.)?profile_verified["']? does not exist/i.test(failure.message)) {
-          console.error('Falha ao carregar selos de perfil verificado:', failure);
-          setVerified(new Set());
-          setError('');
-          return;
-        }
         if (failure) throw new Error(failure.message);
         const next = new Set<string>(results.flatMap((result) => (result.data ?? [])
           .filter((row) => row.profile_verified === true).map((row) => row.id)));
@@ -92,7 +85,7 @@ export function ProfessionalVerificationProvider({ children }: { children: React
   const value = useMemo(() => ({ verified, register }), [verified, register]);
   return (
     <VerificationContext.Provider value={value}>
-      {error && <div className="mx-auto max-w-2xl p-4"><Toast tone="error">{error}</Toast></div>}
+      {error && <div className="mx-auto w-full max-w-2xl p-4"><Toast tone="error">{error}</Toast></div>}
       {children}
     </VerificationContext.Provider>
   );

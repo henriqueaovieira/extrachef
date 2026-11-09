@@ -60,6 +60,7 @@ async function database(t) {
   await db.exec(`INSERT INTO work_locations(restaurant_id,name,address,number,city,state)
     VALUES('${id(1)}','Legado','Rua Antiga','','São Paulo','SP')`);
   await db.exec(source('20261105000000_restaurant_operational_locations.sql'));
+  await db.exec(source('20261105020000_require_onsite_work_location_confirmation.sql'));
   const rows = async (sql, args = []) => (await db.query(sql, args)).rows;
   const one = async (sql, args = []) => (await rows(sql, args))[0];
   const login = n => db.exec(`RESET ROLE; SET request.jwt.claim.sub='${id(n)}'; SET ROLE authenticated;`);
@@ -126,8 +127,8 @@ test('locations require CEP and number, first permanent location becomes primary
   await assert.rejects(save(), /conta do restaurante/);
 });
 
-test('coordinates come only from the server cache; street-level results require confirmation', async t => {
-  const { one, rows, login, save, cache } = await database(t);
+test('coordinates come only from the server cache; geocoded results require on-site confirmation', async t => {
+  const { one, rows, login, admin, save, cache, demand } = await database(t);
   await login(1);
   const house = await save();
   await assert.rejects(one('SELECT * FROM apply_work_location_geocode($1,$2)', [house.id, house.address_version]),
@@ -136,10 +137,18 @@ test('coordinates come only from the server cache; street-level results require 
   await cache(1, house, -23.55, -46.63);
   await assert.rejects(one('SELECT * FROM apply_work_location_geocode($1,$2)', [house.id, house.address_version + 1]),
     /alterado em outra sessão/);
-  const resolved = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [house.id, house.address_version]);
+  const houseReview = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [house.id, house.address_version]);
+  assert.equal(houseReview.geocoding_status, 'needs_review');
+  assert.equal(houseReview.geocoding_precision, 'house');
+  assert.equal(houseReview.latitude, null);
+  assert.equal(houseReview.candidate_latitude, -23.55);
+  assert.equal(houseReview.confirmed_at, null);
+  await assert.rejects(demand('catalog', house.id, houseReview.revision), /Confirme presencialmente/);
+  const resolved = await one(`SELECT * FROM confirm_work_location($1,$2,'device',-23.55,-46.63,8)`,
+    [houseReview.id, houseReview.revision]);
   assert.equal(resolved.geocoding_status, 'resolved');
-  assert.equal(resolved.geocoding_precision, 'house');
-  assert.equal(resolved.latitude, -23.55);
+  assert.equal(resolved.geocoding_precision, 'device');
+  assert.equal(resolved.coordinate_source, 'manual');
   assert.ok(resolved.confirmed_at);
   await login(3);
   await assert.rejects(one('SELECT * FROM apply_work_location_geocode($1,$2)', [house.id, house.address_version]),
@@ -157,7 +166,7 @@ test('coordinates come only from the server cache; street-level results require 
     /50 m/);
   await assert.rejects(rows(`SELECT confirm_work_location($1,$2,'device',-22.60,-47.89,10)`, [review.id, review.revision]),
     /mais de 1 km/);
-  await assert.rejects(rows(`SELECT confirm_work_location($1,$2,'other')`, [review.id, review.revision]), /inválida/);
+  await assert.rejects(rows(`SELECT confirm_work_location($1,$2,'approximate')`, [review.id, review.revision]), /presencialmente/);
   await assert.rejects(rows(`SELECT confirm_work_location($1,$2,'device',-22.5436,-47.8990,8)`, [review.id, review.revision + 1]),
     /outra sessão/);
   const device = await one(`SELECT * FROM confirm_work_location($1,$2,'device',-22.5436,-47.8990,8)`, [review.id, review.revision]);
@@ -173,12 +182,24 @@ test('coordinates come only from the server cache; street-level results require 
   const other = await save({ name: 'Outra', address: 'Rua das Palmeiras', number: '10' });
   await cache(1, other, -23.60, -46.70, '');
   const pending = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [other.id, other.address_version]);
-  const approximate = await one(`SELECT * FROM confirm_work_location($1,$2,'approximate')`, [pending.id, pending.revision]);
-  assert.equal(approximate.geocoding_precision, 'street');
-  assert.equal(approximate.coordinate_source, 'geocoder');
-  assert.equal(approximate.latitude, -23.60);
+  await assert.rejects(rows(`SELECT confirm_work_location($1,$2,'approximate')`, [pending.id, pending.revision]),
+    /presencialmente/);
+  await admin();
+  await rows(`UPDATE work_locations SET latitude=-23.60, longitude=-46.70, coordinate_source='geocoder',
+    geocoding_status='resolved', geocoding_precision='street', candidate_latitude=NULL, candidate_longitude=NULL,
+    confirmed_at=now(), revision=revision+1 WHERE id=$1`, [pending.id]);
+  await login(1);
+  const legacyStreet = await one('SELECT * FROM work_locations WHERE id=$1', [pending.id]);
+  assert.equal(legacyStreet.geocoding_status, 'resolved');
+  assert.equal(legacyStreet.geocoding_precision, 'street');
+  await assert.rejects(demand('catalog', legacyStreet.id, legacyStreet.revision), /Confirme presencialmente/);
+  const otherConfirmed = await one(`SELECT * FROM confirm_work_location($1,$2,'device',-23.60,-46.70,8)`,
+    [legacyStreet.id, legacyStreet.revision]);
+  assert.equal(otherConfirmed.geocoding_precision, 'device');
+  assert.equal(otherConfirmed.coordinate_source, 'manual');
+  assert.equal(otherConfirmed.latitude, -23.60);
 
-  const edited = await save({ ...other, name: 'Outra', number: '12', id: other.id, revision: approximate.revision });
+  const edited = await save({ ...other, name: 'Outra', number: '12', id: other.id, revision: otherConfirmed.revision });
   assert.equal(edited.geocoding_status, 'pending', 'address change invalidates coordinates');
   assert.equal(edited.latitude, null);
   assert.equal(edited.geocoding_precision, null);
@@ -197,11 +218,15 @@ test('operations only use resolved, active and valid locations and snapshot thei
   const { one, rows, login, admin, save, cache, demand } = await database(t);
   await login(1);
   await assert.rejects(demand('restaurant'), /Cadastre o endereço operacional principal/);
+  await assert.rejects(demand('none'), /Confirme presencialmente/);
   const primary = await save();
-  await assert.rejects(demand('restaurant'), /Confirme a localização/);
-  await assert.rejects(demand('catalog', primary.id, primary.revision), /Confirme a localização/);
+  await assert.rejects(demand('restaurant'), /Confirme presencialmente/);
+  await assert.rejects(demand('catalog', primary.id, primary.revision), /Confirme presencialmente/);
   await cache(1, primary, -23.55, -46.63);
-  const ready = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [primary.id, primary.address_version]);
+  const candidate = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [primary.id, primary.address_version]);
+  await assert.rejects(demand('restaurant'), /Confirme presencialmente/);
+  await assert.rejects(demand('catalog', primary.id, candidate.revision), /Confirme presencialmente/);
+  const ready = await one(`SELECT * FROM confirm_work_location($1,$2,'device',-23.55,-46.63,8)`, [candidate.id, candidate.revision]);
   const fromPrimary = await demand('restaurant');
   const job = await one('SELECT * FROM jobs WHERE demand_id=$1', [fromPrimary.id]);
   assert.equal(job.work_location_id, primary.id);
@@ -214,8 +239,24 @@ test('operations only use resolved, active and valid locations and snapshot thei
   const tomorrow = (await one(`SELECT ((now() AT TIME ZONE 'America/Sao_Paulo')::date + 1)::text AS d`)).d;
   const temporary = await save({ name: 'Evento', address: 'Rua do Evento', number: '5', kind: 'temporary', valid_until: tomorrow });
   await cache(1, temporary, -23.56, -46.64);
-  const event = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [temporary.id, temporary.address_version]);
+  const temporaryCandidate = await one('SELECT * FROM apply_work_location_geocode($1,$2)', [temporary.id, temporary.address_version]);
+  await assert.rejects(demand('catalog', temporaryCandidate.id, temporaryCandidate.revision, tomorrow), /Confirme presencialmente/);
+  const pendingEvent = await one(`SELECT * FROM save_restaurant_event(
+    'Evento','Detalhes',$1,'10:00','18:00',1,'scheduled',NULL,NULL,'set',$2,$3)`,
+  [tomorrow, temporaryCandidate.id, temporaryCandidate.revision]);
+  await assert.rejects(one(`SELECT create_restaurant_demand(
+    'Garçom','Evento',$1,'10:00','18:00',150,'event',NULL,NULL,$2,$3) AS id`,
+  [tomorrow, pendingEvent.id, pendingEvent.revision]), /Confirme presencialmente a localização do evento/);
+  const event = await one(`SELECT * FROM confirm_work_location($1,$2,'device',-23.56,-46.64,8)`,
+    [temporaryCandidate.id, temporaryCandidate.revision]);
   await demand('catalog', event.id, event.revision, tomorrow);
+  const confirmedEvent = await one(`SELECT * FROM save_restaurant_event(
+    'Evento','Detalhes',$1,'10:00','18:00',1,'scheduled',$2,$3,'set',$4,$5)`,
+  [tomorrow, pendingEvent.id, pendingEvent.revision, event.id, event.revision]);
+  const eventDemand = await one(`SELECT create_restaurant_demand(
+    'Garçom','Evento',$1,'10:00','18:00',150,'event',NULL,NULL,$2,$3) AS id`,
+  [tomorrow, confirmedEvent.id, confirmedEvent.revision]);
+  assert.equal((await one('SELECT location_status FROM jobs WHERE demand_id=$1', [eventDemand.id])).location_status, 'ready');
   await assert.rejects(demand('catalog', event.id, event.revision, '2099-01-01'), /temporário não é válido/);
   await admin();
   await rows(`UPDATE work_locations SET valid_until=(now() AT TIME ZONE 'America/Sao_Paulo')::date - 1 WHERE id=$1`, [event.id]);
@@ -227,7 +268,7 @@ test('operations only use resolved, active and valid locations and snapshot thei
   const moved = await save({ name: 'Matriz', address: 'Rua Nova', number: '1', id: ready.id, revision: ready.revision });
   assert.equal(moved.geocoding_status, 'pending');
   assert.equal((await one('SELECT work_address, work_latitude FROM jobs WHERE id=$1', [job.id])).work_latitude, -23.55);
-  await assert.rejects(demand('restaurant'), /Confirme a localização/);
+  await assert.rejects(demand('restaurant'), /Confirme presencialmente/);
   await rows(`SELECT manage_work_location($1,'archive',$2)`, [moved.id, moved.revision]);
   await assert.rejects(demand('restaurant'), /Cadastre o endereço operacional principal/);
   await assert.rejects(demand('catalog', moved.id, moved.revision + 1), /Local indisponível/);

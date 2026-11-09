@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import ts from 'typescript';
 import { describeHire, formatClock, formatHireDay, hireTimeline, isActiveAssignment, loadRestaurantTeam, sortTeam } from '../lib/restaurant-team.ts';
+
+const require = createRequire(import.meta.url);
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+function load(file, dependencies = {}) {
+  const { outputText } = ts.transpileModule(readFileSync(new URL(file, import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
+  });
+  const exports = {};
+  new Function('require', 'exports', outputText)(name => Object.hasOwn(dependencies, name) ? dependencies[name] : require(name), exports);
+  return exports;
+}
+const ui = load('../app/components/ui/index.tsx', { '@/lib/ui/input-masks': load('../lib/ui/input-masks.ts') });
+const TeamBoard = load('../app/restaurant/team/team-center.tsx', {
+  '@/app/components/ui': ui,
+  '@/app/components/professional-verification': { default: () => null },
+  '@/app/components/mobile-bottom-nav': { default: () => null },
+  '@/lib/supabase/client': { createClient() { throw new Error('Unexpected database access'); } },
+  '@/lib/restaurant-team': { describeHire, formatClock, formatHireDay, hireTimeline, loadRestaurantTeam },
+  'next/link': { default: ({ children, ...props }) => React.createElement('a', props, children) },
+}).TeamBoard;
 
 const now = new Date('2026-10-16T20:18:00Z'); // Friday 17:18 in São Paulo
 const context = (phase, extra = {}) => ({
@@ -62,6 +86,33 @@ test('formats card day and hours', () => {
   assert.equal(formatHireDay('2026-10-16T21:00:00Z', now), 'Hoje');
   assert.equal(formatHireDay('2026-10-17T21:00:00Z', now), 'Amanhã');
   assert.equal(formatHireDay('2026-10-18T21:00:00Z', now), 'Domingo');
+});
+
+test('team presentation preserves supplied order and destinations while exposing responsibility and EVC status', () => {
+  const hires = [
+    describeHire(context('working', { checkin_at: now.toISOString(), worker_name: 'Primeiro' }), now),
+    describeHire(context('receipt', { checkin_at: now.toISOString(), paid_at: now.toISOString(), worker_name: 'Segundo' }), now),
+    describeHire(context('absence_pending', { worker_name: 'Terceiro' }), now),
+    describeHire(context('payment_disputed', { worker_name: 'Quarto' }), now),
+    describeHire(context('completed', { worker_name: 'Quinto' }), now),
+    describeHire(context('confirmed', { starts_at: '2026-10-19T21:00:00Z', worker_name: 'Sexto' }), now),
+  ];
+  const original = structuredClone(hires);
+  const html = renderToStaticMarkup(React.createElement(TeamBoard, { hires, now, loading: false, error: '', onRetry() {} }));
+  const articles = [...html.matchAll(/<article\b[\s\S]*?<\/article>/g)].map(match => match[0]);
+  assert.equal(articles.length, hires.length);
+  for (const [index, tone] of ['info', 'warning', 'warning', 'danger', 'success', 'neutral'].entries()) {
+    assert.match(articles[index], new RegExp(`ec-badge--${tone}`));
+    assert.ok(articles[index].includes(hires[index].context.worker_name));
+    assert.match(articles[index], /Responsável:|Responsável<!-- -->:/);
+    assert.match(articles[index], /Próxima ação:/);
+    if (hires[index].action) assert.ok(articles[index].includes(`href="${hires[index].action.href}"`));
+  }
+  assert.match(articles[0], /Acompanhar operação/);
+  assert.match(articles[1], /Profissional · confirmar recebimento/);
+  assert.match(articles[2], /Profissional apresenta código; restaurante confirma check-in/);
+  assert.match(articles[4], /data-attention="closed"/);
+  assert.deepEqual(hires, original);
 });
 
 test('loads only valid active hires and skips inconsistent operations', async () => {

@@ -3,7 +3,7 @@
 import ProfessionalVerification from '@/app/components/professional-verification';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { Badge, Button, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
 import MobileBottomNav from '@/app/components/mobile-bottom-nav';
 import { createClient } from '@/lib/supabase/client';
@@ -17,6 +17,14 @@ import {
 } from '@/lib/restaurant-team';
 
 const timelineIcon: Record<TimelineStatus, string> = { done: '✅', current: '⏳', pending: '○', incident: '⚠' };
+const stateTones: Partial<Record<TeamHire['state'], ComponentProps<typeof Badge>['tone']>> = {
+  working: 'info', future: 'neutral', receipt: 'warning', waiting: 'warning', checkin_late: 'warning',
+};
+const actionLabels: Partial<Record<TeamHire['state'], string>> = {
+  working: 'Acompanhar operação', waiting: 'Conferir agenda e check-in',
+  checkin_code: 'Confirmar Check-in', receipt: 'Acompanhar recebimento',
+  checkout_code: 'Acompanhar checkout', absent: 'Conferir ocorrência', abandoned: 'Conferir ocorrência',
+};
 
 function CopyCode({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -31,7 +39,7 @@ function CopyCode({ code }: { code: string }) {
 function NextAction({ hire, full = false }: { hire: TeamHire; full?: boolean }) {
   if (!hire.action) return null;
   const primary = hire.priority <= 5;
-  return <Link href={hire.action.href} className={`ec-button ${primary ? 'ec-button--primary' : 'ec-button--secondary'} px-4 text-sm ${full ? 'w-full' : ''}`}>{hire.action.label}</Link>;
+  return <Link href={hire.action.href} className={`ec-button ${primary ? 'ec-button--primary' : 'ec-button--secondary'} px-4 text-sm ${full ? 'w-full' : ''}`}>{actionLabels[hire.state] ?? hire.action.label}</Link>;
 }
 
 export default function TeamCenter() {
@@ -93,7 +101,7 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
   const hours = (hire: TeamHire) => `${formatClock(hire.context.starts_at)} às ${formatClock(hire.context.ends_at)}`;
 
   return (
-    <main className="min-h-screen bg-[#fafaf9] px-4 py-5 pb-28 text-gray-950 sm:px-8 sm:py-7">
+    <main className="ec-operations-experience min-h-screen bg-[#fafaf9] px-4 py-5 pb-28 text-gray-950 sm:px-8 sm:py-7">
       <section className="mx-auto max-w-3xl space-y-4">
         <header>
           <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Equipe</h1>
@@ -109,16 +117,18 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
               action={<Link href="/restaurant/candidates" className="ec-button ec-button--primary px-4">Ir para Talentos</Link>} />
               : <ul aria-label="Contratações" className="space-y-3">
                 {hires.map((hire) => <li key={hire.context.job_id}>
-                  <article className={`ec-card relative space-y-2 transition hover:border-gray-300 ${hire.state === 'future' ? 'opacity-80' : ''}`}>
+                  <article data-attention={hire.priority <= 5 ? 'pending' : hire.state === 'working' ? 'running' : hire.state === 'completed' ? 'closed' : 'future'} className="ec-card ec-team-operation relative space-y-3 transition hover:border-gray-300">
                     <Button variant="ghost" onClick={() => setSelectedId(hire.context.job_id)}
                       aria-label={`Ver contratação de ${hire.context.worker_name}: ${heading(hire)}`}
                       className="absolute inset-0 z-0 rounded-[1.125rem]" />
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">{heading(hire)}</p>
+                    <Badge tone={hire.context.phase === 'payment_disputed' ? 'danger' : stateTones[hire.state] ?? hire.tone}>{hire.state === 'working' ? 'Em andamento' : hire.label}</Badge>
+                    <p className="text-sm font-semibold">Próxima ação: {actionLabels[hire.state] ?? hire.action?.label ?? (hire.state === 'completed' ? 'Consultar conclusão' : 'Acompanhar agenda')}</p>
+                    <p className="text-xs text-gray-600">Responsável: {hire.state === 'receipt' ? 'Profissional · confirmar recebimento' : hire.state === 'working' || hire.state === 'future' ? 'Restaurante e profissional · acompanhar agenda' : ['waiting', 'checkin_code', 'checkin_late'].includes(hire.state) ? 'Profissional apresenta código; restaurante confirma check-in' : hire.state === 'checkout' || hire.state === 'checkout_code' ? 'Restaurante gera código; profissional realiza checkout' : 'Restaurante · conferir a próxima ação'}</p>
+                    <p className="text-xs font-semibold text-gray-600">{heading(hire)}</p>
                     <div>
-                      <h2 className="flex items-center text-base font-semibold text-gray-950"><span className="truncate">{hire.context.worker_name}</span><ProfessionalVerification jobId={hire.context.job_id} /></h2>
+                      <h2 className="flex min-w-0 items-center text-base font-semibold text-gray-950"><span className="min-w-0 break-words">{hire.context.worker_name}</span><ProfessionalVerification jobId={hire.context.job_id} /></h2>
                       <p className="mt-0.5 text-sm text-gray-600">{hours(hire)}</p>
                     </div>
-                    <Badge tone={hire.tone}>{hire.label}</Badge>
                     {hire.state === 'checkout_code' && hire.context.code
                       ? <p className="relative z-10 w-fit select-all font-mono text-3xl font-bold tracking-widest text-gray-950">{hire.context.code}</p>
                       : null}
@@ -143,7 +153,7 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">{heading(selected)}</p>
               <p className="flex items-center text-lg font-semibold">{selected.context.worker_name}<ProfessionalVerification jobId={selected.context.job_id} /></p>
               <p className="text-sm text-gray-600">{hours(selected)}</p>
-              <div className="pt-2"><Badge tone={selected.tone}>{selected.label}</Badge></div>
+              <div className="pt-2"><Badge tone={selected.context.phase === 'payment_disputed' ? 'danger' : stateTones[selected.state] ?? selected.tone}>{selected.state === 'working' ? 'Em andamento' : selected.label}</Badge></div>
               {selected.detail && <p className="pt-1 text-sm text-gray-600">{selected.detail}</p>}
             </div>
             {selected.state === 'checkout_code' && selected.context.code && <div role="status" className="space-y-3 rounded-xl border border-orange-200 p-4">
@@ -155,7 +165,7 @@ export function TeamBoard({ hires, now, loading, error, onRetry }: {
               <h3 id="timeline-heading" className="text-sm font-semibold">Linha do tempo</h3>
               <ol className="mt-3 space-y-2.5">
                 {hireTimeline(selected, now).map((step) => <li key={step.label}
-                  className={`flex items-center justify-between text-sm ${step.status === 'pending' ? 'text-gray-400' : step.status === 'incident' ? 'text-red-700' : 'text-gray-800'}`}>
+                  className={`flex items-center justify-between gap-2 text-sm ${step.status === 'pending' ? 'text-gray-600' : step.status === 'incident' ? 'text-red-700' : 'text-gray-800'}`}>
                   <span className={step.status === 'current' ? 'font-semibold' : ''}>{step.label}</span>
                   <span aria-label={step.status === 'done' ? 'concluído' : step.status === 'current' ? 'em andamento' : step.status === 'incident' ? 'ocorrência' : 'pendente'}>{timelineIcon[step.status]}</span>
                 </li>)}

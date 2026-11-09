@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createRequestClient } from '@/lib/supabase/request';
 import { canAccessPath, dashboardFor, isAccountRole, loginHref } from '@/lib/auth/routes';
+import { isStaffPath, parseStaffMembership } from '@/lib/auth/staff-access';
 
 export async function proxy(request: NextRequest) {
   const { supabase, finish } = createRequestClient(request);
@@ -20,6 +21,22 @@ export async function proxy(request: NextRequest) {
       return finish(NextResponse.redirect(new URL(
         loginHref(original, hadSession ? 'session_expired' : undefined), request.url,
       )));
+    }
+
+    if (isStaffPath(request.nextUrl.pathname)) {
+      const { data: membershipData, error: membershipError } = await supabase.rpc('get_staff_membership');
+      if (membershipError) {
+        console.error('staff_membership_unavailable', {
+          route: request.nextUrl.pathname,
+          code: membershipError.code,
+        });
+        return finish(new NextResponse('Não foi possível validar seu acesso administrativo. Tente novamente.', { status: 503 }));
+      }
+      const membership = parseStaffMembership(membershipData);
+      if (!membership || membership.status !== 'active') {
+        return finish(new NextResponse('Acesso administrativo não autorizado.', { status: 403 }));
+      }
+      return finish();
     }
 
     const { data: account, error: accountError } = await supabase
@@ -52,6 +69,7 @@ export const config = {
   matcher: [
     '/restaurant/:path*', '/worker/:path*', '/chat/:path*',
     '/checkin/:path*', '/checkout/:path*', '/payment/:path*', '/reviews/:path*',
-    '/notifications/:path*', '/settings/:path*', '/profile/:path*',
+    '/notifications/:path*', '/settings/:path*', '/profile/:path*', '/admin/:path*',
+    '/admin',
   ],
 };

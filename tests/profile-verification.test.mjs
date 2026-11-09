@@ -82,6 +82,59 @@ test('badge is icon-only with accessible description and mouse, touch and keyboa
   const badge = source('../app/components/verified-profile-badge.tsx');
   for (const event of ['onClick', 'onMouseEnter', 'onFocus', 'onBlur', 'Escape']) assert.ok(badge.includes(event));
   assert.match(badge, /createPortal/);
+  assert.match(badge, /max-w-\[calc\(100vw-1rem\)\]/);
+  assert.match(badge, /translateY\(min\(0px, calc\(100dvh/);
+  assert.match(badge, /100% - 8px/);
+});
+
+test('badge consumes Escape only for an open tooltip and then permits native dialog cancellation', () => {
+  const React = require('react');
+  const state = [];
+  let cursor = 0;
+  const container = {};
+  const InteractiveBadge = load('../app/components/verified-profile-badge.tsx', {
+    react: {
+      ...React,
+      useId: () => 'verification-tooltip',
+      useRef: () => ({ current: {
+        getBoundingClientRect: () => ({ right: 200, bottom: 60 }),
+        closest: () => container,
+      } }),
+      useState(initial) {
+        const index = cursor++;
+        if (!(index in state)) state[index] = initial;
+        return [state[index], next => { state[index] = typeof next === 'function' ? next(state[index]) : next; }];
+      },
+      useEffect() {},
+    },
+    'react-dom': { createPortal: node => node },
+    '@/app/components/ui': ui,
+  }).default;
+  const previousWindow = globalThis.window;
+  globalThis.window = { innerWidth: 375, innerHeight: 812 };
+  const render = () => { cursor = 0; return InteractiveBadge(); };
+  try {
+    for (const trigger of ['onFocus', 'onMouseEnter', 'onClick']) {
+      let button = render().props.children[0];
+      button.props[trigger]({ preventDefault() {}, stopPropagation() {} });
+      let tree = render();
+      assert.ok(tree.props.children.at(-1), `${trigger}: tooltip opened`);
+      let dialogOpen = true;
+      const escape = () => {
+        let prevented = false, stopped = false;
+        button = render().props.children[0];
+        button.props.onKeyDown({ key: 'Escape', preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+        if (!prevented) dialogOpen = false;
+        return { prevented, stopped };
+      };
+      assert.deepEqual(escape(), { prevented: true, stopped: true });
+      tree = render();
+      assert.equal(tree.props.children.at(-1), null);
+      assert.equal(dialogOpen, true);
+      assert.deepEqual(escape(), { prevented: false, stopped: false });
+      assert.equal(dialogOpen, false);
+    }
+  } finally { globalThis.window = previousWindow; }
 });
 
 test('camera flow requires preview confirmation and never sends status from the frontend', () => {
@@ -182,7 +235,7 @@ function mountBadgeProvider(t) {
   };
 }
 
-test('badge provider hides missing-column banner, clears stale badges and recovers when the column returns', async (t) => {
+test('badge provider surfaces missing-column errors, clears stale badges and recovers when the column returns', async (t) => {
   const app = mountBadgeProvider(t);
   await app.refresh({ data: [{ id: 'worker', profile_verified: true }], error: null });
   assert.equal(app.verified().has('worker'), true);
@@ -192,29 +245,26 @@ test('badge provider hides missing-column banner, clears stale badges and recove
   const missing = { code: '42703', message: 'column public_user_directory.profile_verified does not exist' };
   await app.refresh({ data: null, error: missing });
   assert.equal(app.verified().size, 0);
-  assert.doesNotMatch(app.html(), /Não foi possível atualizar os selos/);
+  assert.match(app.html(), /Não foi possível atualizar os selos/);
   assert.match(app.html(), /Talentos preservados/);
   assert.deepEqual(console.error.mock.calls.at(-1).arguments, [
-    'Falha ao carregar selos de perfil verificado:', missing,
+    'Falha ao carregar selos de perfil verificado:', missing.message,
   ]);
   await app.refresh({ data: [{ id: 'worker', profile_verified: true }], error: null });
   assert.equal(app.verified().has('worker'), true);
 });
 
-test('badge provider keeps other database failures visible and clears the banner on missing-column fallback', async (t) => {
+test('badge provider keeps all database failures visible', async (t) => {
   const app = mountBadgeProvider(t);
   for (const error of [
     { code: '42501', message: 'permission denied for view public_user_directory' },
     { code: '42703', message: 'column public_user_directory.id does not exist' },
     { code: '42P01', message: 'relation public_user_directory does not exist' },
+    { code: '42703', message: 'column "profile_verified" does not exist' },
   ]) {
     await app.refresh({ data: null, error });
     assert.match(app.html(), /Não foi possível atualizar os selos/);
   }
-  await app.refresh({
-    data: null, error: { code: '42703', message: 'column "profile_verified" does not exist' },
-  });
-  assert.doesNotMatch(app.html(), /Não foi possível atualizar os selos/);
   assert.equal(app.verified().size, 0);
 });
 

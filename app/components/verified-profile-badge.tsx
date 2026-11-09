@@ -8,12 +8,13 @@ export default function VerifiedProfileBadge() {
   const id = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [pinned, setPinned] = useState(false);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; container: Element } | null>(null);
   const show = () => {
     const bounds = buttonRef.current?.getBoundingClientRect();
     if (bounds) setPosition({
       left: Math.max(8, Math.min(bounds.right - 224, window.innerWidth - 232)),
       top: Math.max(8, Math.min(bounds.bottom + 4, window.innerHeight - 112)),
+      container: buttonRef.current?.closest('dialog[open]') ?? document.body,
     });
   };
   const close = () => { setPinned(false); setPosition(null); };
@@ -42,7 +43,7 @@ export default function VerifiedProfileBadge() {
         onMouseEnter={show}
         onMouseLeave={() => { if (!pinned) setPosition(null); }}
         onFocus={show}
-        onKeyDown={(event) => { if (event.key === 'Escape') close(); }}
+        onKeyDown={(event) => { if (event.key === 'Escape' && position) { event.preventDefault(); event.stopPropagation(); close(); } }}
         onBlur={close}
         className="size-11 shrink-0 rounded-full p-0 text-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
       >
@@ -51,12 +52,17 @@ export default function VerifiedProfileBadge() {
           <path d="m8 12 3 3 5-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </Button>
-      <span id={id} className="sr-only">A identidade deste profissional foi validada pelo ExtraChef.</span>
+      <span id={id} className="sr-only">A identidade deste profissional foi validada pelo ExtraChef. Não certifica qualificação ou disponibilidade.</span>
       {position && createPortal(
-        <span role="tooltip" style={position} className="pointer-events-none fixed z-[100] w-56 rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal text-gray-700 shadow-lg">
+        <span role="tooltip" style={{
+          left: `min(${position.left}px, max(8px, calc(100vw - 232px)))`,
+          top: position.top,
+          transform: `translateY(min(0px, calc(100dvh - ${position.top}px - 100% - 8px)))`,
+        }} className="pointer-events-none fixed z-[100] w-56 max-w-[calc(100vw-1rem)] break-words rounded-lg border border-gray-200 bg-white p-3 text-left text-xs font-normal text-gray-700 shadow-lg">
           <strong className="mb-1 block text-sm text-gray-950">Perfil Verificado</strong>
           A identidade deste profissional foi validada pelo ExtraChef.
-        </span>, document.body,
+          {' '}Não certifica qualificação ou disponibilidade.
+        </span>, position.container,
       )}
     </span>
   );

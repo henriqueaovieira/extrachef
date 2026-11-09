@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { Badge, Button, MaskedInput, Select, TextInput, Toast } from '@/app/components/ui';
-import { createClient } from '@/lib/supabase/client';
-import { confirmLocation, lookupPostalCode, retryLocation, saveLocation } from '@/lib/locations/client';
+import { lookupPostalCode, retryLocation, saveLocation } from '@/lib/locations/client';
 import {
-  brazilianStates, emptyLocationInput, formatLocationAddress, locationStatusLabel, postalCodeDigits,
-  validateLocationInput, type CatalogLocation, type LocationInput,
+  brazilianStates, emptyLocationInput, formatLocationAddress, locationHasOperationalCoordinates,
+  locationStatusLabel, postalCodeDigits, validateLocationInput,
+  type CatalogLocation, type LocationInput,
 } from '@/lib/work-locations';
 
 export default function LocationForm({ location, temporaryUntil, allowTemporary = true, makeDefault = false, onSaved, onCancel }: {
@@ -18,14 +18,13 @@ export default function LocationForm({ location, temporaryUntil, allowTemporary 
   onSaved: (location: CatalogLocation) => void;
   onCancel?: () => void;
 }) {
-  const [supabase] = useState(() => createClient());
   const [form, setForm] = useState<LocationInput>(() => location ? {
     name: location.name, address: location.address, number: location.number, neighborhood: location.neighborhood,
     city: location.city, state: location.state, postal_code: location.postal_code,
     kind: location.kind, valid_until: location.valid_until, make_default: location.is_default,
   } : { ...emptyLocationInput, make_default: makeDefault });
   const [saved, setSaved] = useState<CatalogLocation | null>(null);
-  const [busy, setBusy] = useState<'' | 'cep' | 'save' | 'device' | 'approximate' | 'retry'>('');
+  const [busy, setBusy] = useState<'' | 'cep' | 'save' | 'retry'>('');
   const [message, setMessage] = useState<{ tone: 'error' | 'info' | 'success'; text: string } | null>(null);
   const update = (patch: Partial<LocationInput>) => setForm((current) => ({ ...current, ...patch }));
 
@@ -33,10 +32,11 @@ export default function LocationForm({ location, temporaryUntil, allowTemporary 
     setSaved(next);
     onSaved(next);
     if (warning) setMessage({ tone: 'error', text: warning });
-    else if (next.geocoding_status === 'resolved') setMessage({ tone: 'success', text: 'Local salvo e localização confirmada.' });
-    else if (next.geocoding_status === 'needs_review') {
-      setMessage({ tone: 'info', text: 'Encontramos a rua, mas não o número exato. Confirme a posição para liberar o check-in por GPS.' });
-    } else setMessage({ tone: 'error', text: 'Não localizamos este endereço. Revise os dados ou tente novamente.' });
+    else if (locationHasOperationalCoordinates(next)) {
+      setMessage({ tone: 'success', text: next.geocoding_precision === 'street'
+        ? 'Local salvo. Pode publicar operações; os check-ins validarão a posição em um raio de até 300 m.'
+        : 'Local salvo e disponível para publicação.' });
+    } else setMessage({ tone: 'info', text: 'Local salvo. A localização ainda está pendente e não pode ser usada para publicar.' });
   };
 
   const fillFromPostalCode = async (value: string) => {
@@ -77,17 +77,6 @@ export default function LocationForm({ location, temporaryUntil, allowTemporary 
       accept(result.location, result.geocodingError?.message);
     } catch (error) {
       setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Não foi possível salvar o local.' });
-    } finally { setBusy(''); }
-  };
-
-  const confirm = async (method: 'device' | 'approximate') => {
-    if (!saved || busy) return;
-    setBusy(method);
-    setMessage(null);
-    try {
-      accept(await confirmLocation(supabase, saved, method));
-    } catch (error) {
-      setMessage({ tone: 'error', text: error instanceof Error ? error.message : 'Não foi possível confirmar a posição.' });
     } finally { setBusy(''); }
   };
 
@@ -185,18 +174,10 @@ export default function LocationForm({ location, temporaryUntil, allowTemporary 
       {saved && <div className="space-y-2 rounded-xl border border-gray-200 p-3" aria-live="polite">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-gray-700">{formatLocationAddress(saved)}</p>
-          <Badge tone={saved.geocoding_status === 'resolved' ? 'success' : saved.geocoding_status === 'needs_review' ? 'warning' : 'danger'}>
+          <Badge tone={locationHasOperationalCoordinates(saved) ? 'success' : saved.geocoding_status === 'failed' ? 'danger' : 'warning'}>
             {locationStatusLabel(saved)}
           </Badge>
         </div>
-        {saved.geocoding_status === 'needs_review' && <div className="flex flex-wrap gap-2">
-          <Button variant="primary" busy={busy === 'device'} disabled={Boolean(busy)} onClick={() => { void confirm('device'); }}>
-            Confirmar no local (GPS)
-          </Button>
-          <Button busy={busy === 'approximate'} disabled={Boolean(busy)} onClick={() => { void confirm('approximate'); }}>
-            Usar localização aproximada
-          </Button>
-        </div>}
         {(saved.geocoding_status === 'failed' || saved.geocoding_status === 'pending') && (
           <Button busy={busy === 'retry'} disabled={Boolean(busy)} onClick={() => { void retry(); }}>Tentar localizar novamente</Button>
         )}

@@ -78,10 +78,35 @@ export function validateLocationInput(input: LocationInput) {
 }
 
 export function locationSelectable(location: CatalogLocation, operationDate = '', today = todayInSaoPaulo()) {
-  if (location.archived_at || location.geocoding_status !== 'resolved') return false;
+  if (location.archived_at || !locationHasOperationalCoordinates(location)) return false;
   if (location.kind !== 'temporary') return true;
   if (!location.valid_until || location.valid_until < today) return false;
   return !operationDate || operationDate <= location.valid_until;
+}
+
+export function locationHasOperationalCoordinates(location: Pick<CatalogLocation,
+  'geocoding_status' | 'geocoding_precision' | 'latitude' | 'longitude' | 'candidate_latitude' | 'candidate_longitude'>) {
+  if (location.geocoding_precision === 'street' || location.geocoding_precision === 'house') {
+    const latitude = location.candidate_latitude ?? location.latitude;
+    const longitude = location.candidate_longitude ?? location.longitude;
+    return ['needs_review', 'resolved'].includes(location.geocoding_status)
+      && latitude !== null && longitude !== null;
+  }
+  return location.geocoding_status === 'resolved'
+    && location.geocoding_precision === 'device'
+    && location.latitude !== null && location.longitude !== null;
+}
+
+export function hasOnSiteLocationConfirmation(location: Pick<CatalogLocation, 'geocoding_status' | 'geocoding_precision' | 'confirmed_at'>) {
+  return location.geocoding_status === 'resolved'
+    && location.geocoding_precision === 'device'
+    && location.confirmed_at !== null;
+}
+
+export function locationNeedsOnSiteConfirmation(location: Pick<CatalogLocation, 'geocoding_status' | 'geocoding_precision' | 'confirmed_at'>) {
+  return location.geocoding_status === 'needs_review'
+    && location.geocoding_precision !== 'street'
+    || (location.geocoding_status === 'resolved' && !hasOnSiteLocationConfirmation(location));
 }
 
 export function formatLocationAddress(location: LocationForm) {
@@ -94,10 +119,10 @@ export function formatLocationAddress(location: LocationForm) {
 
 export function locationStatusLabel(location: CatalogLocation) {
   if (location.archived_at) return 'Arquivado';
-  if (location.geocoding_status === 'resolved') {
-    return location.geocoding_precision === 'street' ? 'Localização aproximada confirmada' : 'Localização confirmada';
-  }
-  if (location.geocoding_status === 'needs_review') return 'Confirme a posição exata';
+  if (location.geocoding_precision === 'device' && location.geocoding_status === 'resolved') return 'Precisão validada pelo aparelho';
+  if (location.geocoding_precision === 'house' && locationHasOperationalCoordinates(location)) return 'Endereço localizado · raio de 100 m';
+  if (location.geocoding_precision === 'street' && locationHasOperationalCoordinates(location)) return 'Endereço aproximado · raio de 300 m';
+  if (location.geocoding_status === 'needs_review') return 'Localização pendente';
   if (location.geocoding_status === 'failed') return 'Endereço não localizado';
   return 'Localização pendente';
 }

@@ -72,13 +72,13 @@ export async function lookupPostalCode(cep: string): Promise<PostalCodeLookup> {
 export async function confirmLocation(
   supabase: SupabaseClient,
   location: CatalogLocation,
-  method: 'device' | 'approximate',
+  method: 'device',
 ) {
-  const coordinates = method === 'device' ? await getDeviceCoordinates() : null;
+  const coordinates = await getDeviceCoordinates();
   const { data, error } = await supabase.rpc('confirm_work_location', {
     p_id: location.id, p_expected_revision: location.revision, p_method: method,
-    p_latitude: coordinates?.latitude ?? null, p_longitude: coordinates?.longitude ?? null,
-    p_accuracy: coordinates?.accuracy ?? null,
+    p_latitude: coordinates.latitude, p_longitude: coordinates.longitude,
+    p_accuracy: coordinates.accuracy,
   });
   if (error) throw new Error(error.message);
   return parseLocation(data);

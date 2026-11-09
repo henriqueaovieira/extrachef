@@ -12,7 +12,9 @@ import LocationForm from '@/app/components/location-form';
 import { loadPendingReviews, type PendingReview } from '@/lib/operations';
 import { commonSpecialties } from '@/lib/specialties';
 import { loadWorkLocations } from '@/lib/locations/client';
-import { formatLocationAddress, locationSelectable, type CatalogLocation } from '@/lib/work-locations';
+import {
+  formatLocationAddress, locationHasOperationalCoordinates, locationSelectable, type CatalogLocation,
+} from '@/lib/work-locations';
 import { recruitmentWindow } from '@/lib/demands';
 
 export default function CreateJobPage() {
@@ -39,11 +41,11 @@ export default function CreateJobPage() {
   const selectable = (locations ?? []).filter((location) => locationSelectable(location, jobDate));
   const selectedLocation = selectable.find((location) => location.id === locationId)
     ?? selectable.find((location) => location.is_default) ?? selectable[0] ?? null;
-  const pendingLocations = (locations ?? []).filter((location) => !location.archived_at && location.geocoding_status !== 'resolved');
+  const pendingLocations = (locations ?? []).filter((location) => !location.archived_at && !locationHasOperationalCoordinates(location));
 
   const rememberLocation = (location: CatalogLocation) => {
     setLocations((current) => [location, ...(current ?? []).filter((item) => item.id !== location.id)]);
-    if (location.geocoding_status === 'resolved') {
+    if (locationSelectable(location, jobDate)) {
       setLocationId(location.id);
       setAddingLocation(false);
     }
@@ -83,7 +85,7 @@ export default function CreateJobPage() {
       }
       const { data: authData, error: authError } = await supabase.auth.getUser();
       if (authError || !authData.user) throw new Error('Sessão expirada. Faça login novamente.');
-      if (!selectedLocation) throw new Error('Selecione um local operacional confirmado antes de publicar.');
+      if (!selectedLocation) throw new Error('Selecione um local com coordenadas operacionais antes de publicar.');
       const { data: demandId, error } = await supabase.rpc('create_restaurant_demand', {
         p_title: role,
         p_description: description,
@@ -142,12 +144,16 @@ export default function CreateJobPage() {
                   {location.name}{location.is_default ? ' (principal)' : location.kind === 'temporary' ? ' (temporário)' : ''}
                 </option>)}
               </Select>
-              {selectedLocation && <p className="mt-1 text-xs text-gray-500">{formatLocationAddress(selectedLocation)}</p>}
+              {selectedLocation && <p className="mt-1 text-xs text-gray-500">
+                {formatLocationAddress(selectedLocation)}
+                {selectedLocation.geocoding_precision === 'street' && ' · Precisão aproximada: check-in com raio de até 300 m.'}
+                {selectedLocation.geocoding_precision === 'house' && ' · Check-in com raio de até 100 m.'}
+              </p>}
             </div> : <Toast tone="info">
-              Nenhum local confirmado disponível{jobDate ? ' para esta data' : ''}. Cadastre o endereço operacional com CEP para publicar.
+              Nenhum local com coordenadas operacionais disponível{jobDate ? ' para esta data' : ''}. Cadastre ou localize um endereço em <Link href="/restaurant/locations" className="underline">Locais operacionais</Link> para publicar.
             </Toast>}
             {pendingLocations.length > 0 && !addingLocation && <p className="text-xs text-gray-500">
-              {pendingLocations.length === 1 ? '1 local aguarda' : `${pendingLocations.length} locais aguardam`} confirmação em <Link href="/restaurant/locations" className="underline">Locais operacionais</Link>.
+              {pendingLocations.length === 1 ? '1 local aguarda localização' : `${pendingLocations.length} locais aguardam localização`} em <Link href="/restaurant/locations" className="underline">Locais operacionais</Link>.
             </p>}
             {addingLocation ? <LocationForm temporaryUntil={jobDate || undefined} allowTemporary={Boolean(jobDate)}
               makeDefault={!(locations ?? []).some((location) => location.is_default && !location.archived_at)}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Badge, Button, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
+import { Badge, Button, Card, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
@@ -9,7 +9,9 @@ import NotificationBell from '@/app/components/notification-bell';
 import { DashboardAvatar, DashboardLogo } from '@/app/components/dashboard-identity';
 import { getDeviceCoordinates, type DeviceCoordinates } from '@/lib/geolocation';
 import { distanceMeters, estimatedDistance } from '@/lib/work-location';
-import { loadPendingReviews, type PendingReview } from '@/lib/operations';
+import {
+  loadPendingReviews, loadWorkerHomeOperations, selectWorkerHomeOperation, type PendingReview,
+} from '@/lib/operations';
 import OperationalReputationView from '@/app/components/operational-reputation';
 import { canRecruitJob, demandWindow } from '@/lib/demands';
 
@@ -57,10 +59,23 @@ interface WorkerStats {
   history: WorkHistoryItem[];
 }
 
+const feedbackTones: Record<string, 'success' | 'info' | 'warning' | 'danger'> = {
+  'Candidatura enviada com sucesso.': 'success',
+  'Detalhes do plantão copiados para compartilhar.': 'success',
+  'O recrutamento desta operação foi encerrado.': 'info',
+  'Antes de se candidatar novamente, avalie sua última experiência.': 'warning',
+  'Compartilhamento não está disponível neste navegador.': 'warning',
+  'Não foi possível conferir suas avaliações pendentes. Atualize a página.': 'danger',
+  'Sua sessão expirou. Entre novamente.': 'danger',
+  'Você já se candidatou a esta vaga.': 'danger',
+  'Não foi possível enviar sua candidatura. Tente novamente.': 'danger',
+  'Não foi possível compartilhar este plantão.': 'danger',
+};
+
 export default function WorkerDashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [appliedJobIds, setAppliedJobIds] = useState<string[]>([]);
-  const [profile, setProfile] = useState<{ name: string } | null>(null);
+  const [profile, setProfile] = useState<{ name: string; role: string } | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [stats, setStats] = useState<WorkerStats | null>(null);
   const [estimatedEarnings, setEstimatedEarnings] = useState(0);
@@ -78,6 +93,7 @@ export default function WorkerDashboardPage() {
   const [profileError, setProfileError] = useState('');
   const [statsError, setStatsError] = useState('');
   const [pendingReviews, setPendingReviews] = useState<PendingReview[]>([]);
+  const [workerOperations, setWorkerOperations] = useState<Awaited<ReturnType<typeof loadWorkerHomeOperations>>>([]);
   const [reviewsError, setReviewsError] = useState('');
   const [reviewsReady, setReviewsReady] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -116,8 +132,8 @@ export default function WorkerDashboardPage() {
           if (isMounted) setReviewsError('Não foi possível conferir as avaliações pendentes.');
         }
 
-        const [profileResult, profilePhotoResult, applicationsResult, jobsResult, statsResult, earningsResult] = await Promise.all([
-          supabase.from('public_user_directory').select('name').eq('id', userId).single(),
+        const [profileResult, profilePhotoResult, applicationsResult, jobsResult, statsResult, earningsResult, operationsResult] = await Promise.all([
+          supabase.from('public_user_directory').select('name, role').eq('id', userId).single(),
           supabase.from('worker_profiles').select('profile_photo_path').eq('user_id', userId).maybeSingle(),
           supabase.from('applications').select('job_id').eq('worker_id', userId),
           supabase
@@ -128,6 +144,8 @@ export default function WorkerDashboardPage() {
             .order('job_date', { ascending: true }),
           supabase.rpc('get_worker_dashboard_stats'),
           supabase.rpc('get_worker_estimated_earnings'),
+          loadWorkerHomeOperations(supabase, userId).then(data => ({ data, error: null }))
+            .catch(error => ({ data: null, error })),
         ]);
 
         if (!isMounted) return;
@@ -174,6 +192,12 @@ export default function WorkerDashboardPage() {
         } else {
           const monthlyEarnings = Number(earningsResult.data ?? 0);
           setEstimatedEarnings(Number.isFinite(monthlyEarnings) ? monthlyEarnings : 0);
+        }
+        if (operationsResult.error) {
+          console.error('Worker operational assignments lookup failed.', operationsResult.error);
+          setWorkerOperations([]);
+        } else {
+          setWorkerOperations(operationsResult.data ?? []);
         }
 
         setLoading(false);
@@ -271,8 +295,8 @@ export default function WorkerDashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500">
-        <LoadingSkeleton label="Carregando vagas disponíveis" />
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 text-gray-600">
+        <LoadingSkeleton label="Carregando operações e oportunidades" />
       </div>
     );
   }
@@ -280,10 +304,10 @@ export default function WorkerDashboardPage() {
   if (!signedIn) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-sm space-y-4 rounded-lg border border-gray-200 bg-white p-6 text-center">
+        <Card className="max-w-sm space-y-4 text-center">
           <p className="text-gray-700">Entre na sua conta para acessar o painel.</p>
-          <Link href="/login" className="inline-flex min-h-10 items-center rounded-lg bg-orange-700 px-4 py-2 text-sm font-semibold text-white">Fazer login</Link>
-        </div>
+          <Link href="/login" className="ec-button ec-button--primary px-4 text-sm">Fazer login</Link>
+        </Card>
       </main>
     );
   }
@@ -293,12 +317,25 @@ export default function WorkerDashboardPage() {
     { label: 'Diárias concluídas', value: stats?.completed_jobs ?? '—' },
     { label: 'Ganhos estimados', value: `R$ ${estimatedEarnings.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` },
   ];
+  const priorityOperation = selectWorkerHomeOperation(workerOperations, now);
+  const relevantOperations = workerOperations.filter((operation) => selectWorkerHomeOperation([operation], now));
+  const operationCardHref = profile?.role !== 'worker' || relevantOperations.length !== 1
+    ? '/worker/applications'
+    : priorityOperation?.href ?? '/worker/applications';
+  const operationCardLabel = priorityOperation?.title === 'Check-in Disponível'
+    ? '📍 Operação de Hoje'
+    : priorityOperation && ['Operação em Andamento', 'Checkout Disponível', 'Pendência Operacional'].includes(priorityOperation.title)
+      ? '📍 Sua Operação'
+      : priorityOperation ? '📍 Próxima Operação' : '📍 Operações';
+  const additionalOperations = Math.max(0, relevantOperations.length - 1);
+  const openJobs = jobs.filter((job) => canRecruitJob(job, now));
+  const visibleJobs = openJobs.filter((job) => !appliedJobIds.includes(job.id));
 
   return (
     <>
-      <main className="min-h-screen bg-white text-gray-950">
-        <header className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-12">
-          <div className="mb-8 flex items-center justify-between">
+      <main className="ec-worker-home min-h-screen bg-gray-50 text-gray-950">
+        <header className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 sm:pt-8">
+          <div className="mb-6 flex items-center justify-between gap-4">
             <DashboardLogo role="worker" />
             <div className="flex items-center gap-3">
               <NotificationBell iconOnly />
@@ -308,68 +345,74 @@ export default function WorkerDashboardPage() {
                 }} />
             </div>
           </div>
-          <h1 className="break-words text-[1.75rem] font-semibold leading-tight tracking-[-0.045em] sm:text-4xl">Bem-vindo 👋</h1>
-          <p className="mt-2 break-words text-lg font-semibold text-gray-900">{profile?.name || 'Profissional'}</p>
-          <p className="mt-2 text-sm text-gray-500 sm:text-base">Encontre operações e acompanhe suas candidaturas.</p>
+          <p className="break-words text-sm text-gray-600">Bem-vindo, {profile?.name || 'Profissional'}</p>
+          <h1 className="mt-2 break-words text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">Sua central operacional</h1>
+          <p className="mt-2 text-sm text-gray-600">Confira sua próxima ação e encontre oportunidades.</p>
         </header>
 
-        <section aria-label="Resumo profissional" className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-2 px-4 pt-10 sm:gap-4 sm:px-6 lg:grid-cols-4">
-          {metricCards.map((card) => <article key={card.label} className="flex min-h-32 min-w-0 flex-col justify-between rounded-2xl border border-gray-200 bg-white p-3 sm:p-5">
-            <p className={`break-words font-semibold tabular-nums ${card.value === '—' ? 'text-sm text-gray-500' : 'text-2xl sm:text-3xl'}`}>{card.value}</p>
-            <p className="mt-1 break-words text-xs leading-4 text-gray-600 sm:text-sm">{card.label}</p>
-          </article>)}
-          <OperationalReputationView summary />
-        </section>
-
-        <section className="mx-auto max-w-6xl space-y-10 px-4 py-8 pb-[calc(12rem+env(safe-area-inset-bottom))] sm:px-6 sm:py-6 sm:pb-[calc(12rem+env(safe-area-inset-bottom))]">
-
-        {pageError && <Toast tone="error">{pageError}</Toast>}
-        {profileError && <Toast tone="error">{profileError}</Toast>}
-        {applicationsError && <Toast tone="error">{applicationsError}</Toast>}
-        {statsError && <Toast tone="error">{statsError}</Toast>}
-        {reviewsError && <Toast tone="error">{reviewsError}</Toast>}
-        {pendingReviews.length > 0 && <section className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50 p-5">
-          <h2 className="text-lg font-semibold">Avaliação pendente</h2>
-          <p className="text-sm text-gray-600">Antes de se candidatar novamente, avalie sua última experiência.</p>
-          {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name} · {review.title}</Link>)}
+        {profile?.role === 'worker' && <section aria-label="Operações" className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6">
+          <Link
+            href={operationCardHref}
+            aria-label={priorityOperation
+              ? `${operationCardLabel}: ${priorityOperation.role}, ${priorityOperation.restaurant}, ${priorityOperation.schedule}. ${additionalOperations > 0 ? 'Ver todas as operações' : priorityOperation.action}`
+              : 'Operações. Acompanhe suas operações, check-ins e histórico de trabalho. Ver Minhas Operações'}
+            className="ec-card ec-worker-home__operation block space-y-4 transition"
+          >
+            {priorityOperation ? <>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <h2 className="text-sm font-semibold text-gray-600">{operationCardLabel}</h2>
+                  <p className="break-words text-xl font-semibold text-gray-950">{priorityOperation.role}</p>
+                  <p className="break-words text-sm text-gray-600">{priorityOperation.restaurant}</p>
+                  <p className="break-words text-sm font-medium text-gray-800">{priorityOperation.schedule}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <Badge tone={priorityOperation.title === 'Checkout Disponível' ? 'success'
+                    : ['Check-in Disponível', 'Pendência Operacional'].includes(priorityOperation.title) ? 'warning' : 'info'}>
+                    {priorityOperation.status}
+                  </Badge>
+                  {additionalOperations > 0 && <Badge tone="neutral">
+                    +{additionalOperations} {additionalOperations === 1 ? 'operação' : 'operações'}
+                  </Badge>}
+                </div>
+              </div>
+              {priorityOperation.title === 'Operação em Andamento' && <p className="mt-2 text-sm text-gray-600">Check-in realizado</p>}
+              <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                <span className="ec-button ec-button--primary flex-1 px-4 text-sm sm:flex-none">
+                <span>{additionalOperations > 0 ? 'Ver todas as operações' : priorityOperation.action}</span>
+                <span aria-hidden="true">→</span>
+                </span>
+              </div>
+            </> : <>
+              <h2 className="text-sm font-semibold text-gray-700">{operationCardLabel}</h2>
+              <p className="break-words text-sm text-gray-600">Consulte suas candidaturas e operações para acompanhar as próximas etapas.</p>
+              <div className="flex items-center justify-between gap-3 border-t border-gray-200 pt-4">
+                <span className="ec-button ec-button--primary flex-1 px-4 text-sm sm:flex-none">
+                <span>Ver Minhas Operações</span>
+                <span aria-hidden="true">→</span>
+                </span>
+              </div>
+            </>}
+          </Link>
         </section>}
-        <section id="historico" className="space-y-4">
-          <div>
-            <h2 className="text-xl font-bold text-gray-950">Histórico de trabalhos</h2>
-            <p className="mt-1 text-sm text-gray-600">Suas diárias em andamento e concluídas.</p>
-          </div>
-          {statsError ? null : !stats?.history?.length ? (
-            <p className="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">Seu histórico aparecerá após iniciar uma diária.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-              <table className="w-full min-w-[680px] text-left text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Vaga</th>
-                    <th className="px-4 py-3 font-semibold">Restaurante</th>
-                    <th className="px-4 py-3 font-semibold">Data</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold">Diária</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {stats.history.map((item) => (
-                    <tr key={`${item.job_id}-${item.job_date}`}>
-                      <td className="px-4 py-3 font-medium text-gray-900">{item.title}</td>
-                      <td className="px-4 py-3 text-gray-600">{item.restaurant_name || 'Estabelecimento'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Date(`${item.job_date}T00:00:00`).toLocaleDateString('pt-BR')}</td>
-                      <td className="px-4 py-3 text-gray-600">{item.status === 'completed' ? 'Concluída' : new Date() >= demandWindow(item).end ? 'Trabalho encerrado' : 'Trabalho em andamento'}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-800">R$ {Number(item.value).toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+
+        <section className="mx-auto max-w-6xl space-y-8 px-4 py-6 pb-[calc(8rem+env(safe-area-inset-bottom))] sm:px-6">
+
+        {pageError && <Toast tone="danger">{pageError}</Toast>}
+        {profileError && <Toast tone="danger">{profileError}</Toast>}
+        {applicationsError && <Toast tone="danger">{applicationsError}</Toast>}
+        {statsError && <Toast tone="danger">{statsError}</Toast>}
+        {reviewsError && <Toast tone="danger">{reviewsError}</Toast>}
+        {pendingReviews.length > 0 && <Card className="ec-worker-home__review space-y-3">
+          <Badge tone="warning">Avaliação pendente</Badge>
+          <h2 className="text-lg font-semibold">Avalie sua última experiência</h2>
+          <p className="text-sm text-gray-600">Antes de se candidatar novamente, avalie sua última experiência.</p>
+          {pendingReviews.map((review) => <Link key={review.job_id} href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary w-full px-4 text-sm sm:w-auto">Avaliar {review.reviewed_name} · {review.title}</Link>)}
+        </Card>}
 
         <div id="vagas" className="space-y-4">
-          <h2 className="text-xl font-bold text-gray-900">Vagas Abertas</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Oportunidades disponíveis</h2>
+          <p className="text-sm text-gray-600">Encontre seu próximo plantão. A candidatura fica aguardando a decisão do restaurante.</p>
           <div className="hidden" aria-hidden="true">
             <Button disabled={locating} busy={locating} onClick={() => {
               setLocating(true); setLocationError('');
@@ -378,32 +421,35 @@ export default function WorkerDashboardPage() {
               }).finally(() => setLocating(false));
             }}>Mostrar distâncias estimadas (opcional)</Button>
             <p className="text-sm text-gray-600">Localização opcional, usada apenas para distância em linha reta. Não limita vagas ou candidaturas.</p>
-            {locationError && <Toast tone="error">{locationError} Você pode continuar se candidatando normalmente.</Toast>}
+            {locationError && <Toast tone="danger">{locationError} Você pode continuar se candidatando normalmente.</Toast>}
           </div>
 
           {feedbackMessage && (
-            <Toast tone="info">{feedbackMessage}</Toast>
+            <Toast tone={feedbackTones[feedbackMessage] ?? 'danger'}>{feedbackMessage}</Toast>
           )}
 
-          {jobsError ? <Toast tone="error">{jobsError}</Toast> : jobs.filter((job) => canRecruitJob(job, now) && !appliedJobIds.includes(job.id)).length === 0 ? (
-            <EmptyState icon="◇" title="Novas oportunidades vêm por aí"
-              description="Não há plantões abertos agora. Enquanto isso, deixe seu perfil pronto para a próxima oportunidade."
+          {jobsError ? <Toast tone="danger" title="Não foi possível carregar as oportunidades.">Tente novamente.</Toast> : openJobs.length === 0 ? (
+            <EmptyState icon="◇" title="Nenhuma oportunidade disponível no momento."
+              description="Novas operações aparecerão aqui assim que forem publicadas."
               action={<Link href="/worker/profile?edit=1" className="inline-flex min-h-12 items-center font-semibold text-orange-800">Revisar meu perfil</Link>} />
+          ) : visibleJobs.length === 0 ? (
+            <EmptyState icon="◇" title="Você já se candidatou para todas as oportunidades disponíveis."
+              description="Acompanhe suas candidaturas em Minhas Operações." />
           ) : (
             <div className="grid gap-4">
-              {jobs.filter((job) => canRecruitJob(job, now) && !appliedJobIds.includes(job.id)).map((job) => {
+              {visibleJobs.map((job) => {
                 const hasApplied = appliedJobIds.includes(job.id);
                 const isProcessing = applyingId === job.id;
 
                 return (
                   <div
                     key={job.id}
-                    className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
+                    className="ec-card flex min-w-0 flex-col items-start justify-between gap-6 md:flex-row md:items-center"
                   >
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="flex items-center gap-3">
-                        <h3 className="text-lg font-bold text-gray-900">{job.title}</h3>
-                        <Badge tone="success">
+                    <div className="w-full min-w-0 flex-1 space-y-2 md:w-auto">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <h3 className="min-w-0 break-words text-lg font-semibold text-gray-900">{job.title}</h3>
+                        <Badge tone="info">
                           Aberta
                         </Badge>
                       </div>
@@ -419,11 +465,11 @@ export default function WorkerDashboardPage() {
                         <p className="text-sm text-gray-600">Distância indisponível: coordenadas da vaga não cadastradas.</p>
                       )}
 
-                      <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 pt-1 font-medium">
+                      <div className="flex flex-wrap items-center gap-4 pt-2 text-xs font-medium text-gray-600">
                         <span>🏢 {job.restaurant?.name || 'Estabelecimento'}</span>
-                        <span>📅 Data: {job.job_date}</span>
-                        <span>⏰ Horário: {job.start_time} às {job.end_time}</span>
-                        <span className="font-bold text-orange-600">💰 R$ {Number(job.value).toFixed(2)}</span>
+                        <span>📅 Data: {new Date(`${job.job_date}T00:00:00`).toLocaleDateString('pt-BR')}</span>
+                        <span>⏰ Horário: {job.start_time.slice(0, 5)} às {job.end_time.slice(0, 5)}</span>
+                        <span className="font-medium tabular-nums text-gray-700">💰 R$ {Number(job.value).toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -437,7 +483,7 @@ export default function WorkerDashboardPage() {
                           type="button"
                           onClick={() => handleApply(job.id)}
                           disabled={isProcessing || applyingId !== null || !reviewsReady || pendingReviews.length > 0}
-                          className="w-full px-6 py-2.5 text-sm shadow-sm"
+                          className="w-full px-6 text-sm"
                         >
                           {isProcessing ? 'Enviando...' : 'Candidatar-se'}
                         </Button>
@@ -445,7 +491,7 @@ export default function WorkerDashboardPage() {
                       <Button
                         type="button"
                         onClick={() => void shareJob(job)}
-                        className="min-h-12 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-800 transition hover:bg-gray-50"
+                        className="w-full px-4 text-sm"
                       >
                         Compartilhar vaga
                       </Button>
@@ -456,6 +502,50 @@ export default function WorkerDashboardPage() {
             </div>
           )}
         </div>
+        <section aria-label="Resumo profissional" className="ec-worker-home__summary space-y-4">
+          <h2 className="text-lg font-semibold text-gray-800">Seu resumo profissional</h2>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {metricCards.map((card) => <Card as="article" key={card.label} className="flex min-w-0 flex-col justify-between gap-2">
+              <p className={`break-words font-semibold tabular-nums ${card.value === '—' ? 'text-sm text-gray-600' : 'text-xl text-gray-800'}`}>{card.value}</p>
+              <p className="break-words text-xs leading-4 text-gray-600">{card.label}</p>
+            </Card>)}
+            <OperationalReputationView summary />
+          </div>
+        </section>
+        <section id="historico" className="scroll-mt-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">Histórico de trabalhos</h2>
+            <p className="mt-2 text-sm text-gray-600">Suas diárias em andamento e concluídas.</p>
+          </div>
+          {statsError ? null : !stats?.history?.length ? (
+            <p className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-600">Seu histórico aparecerá após iniciar uma diária.</p>
+          ) : (
+            <div tabIndex={0} role="region" aria-label="Histórico de trabalhos: tabela com rolagem horizontal" className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="w-full min-w-[680px] text-left text-sm">
+                <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-600">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-semibold">Vaga</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Restaurante</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Data</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                    <th scope="col" className="px-4 py-3 font-semibold">Diária</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {stats.history.map((item) => (
+                    <tr key={`${item.job_id}-${item.job_date}`}>
+                      <td className="break-words px-4 py-3 font-medium text-gray-900">{item.title}</td>
+                      <td className="break-words px-4 py-3 text-gray-600">{item.restaurant_name || 'Estabelecimento'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-600">{new Date(`${item.job_date}T00:00:00`).toLocaleDateString('pt-BR')}</td>
+                      <td className="px-4 py-3 text-gray-600">{item.status === 'completed' ? 'Concluída' : new Date() >= demandWindow(item).end ? 'Trabalho encerrado' : 'Trabalho em andamento'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-800">R$ {Number(item.value).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
         </section>
       </main>
       <MobileBottomNav role="worker" showOnDesktop />

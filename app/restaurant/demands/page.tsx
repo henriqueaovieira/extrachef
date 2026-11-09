@@ -55,18 +55,18 @@ export default function RestaurantDemands() {
   ] as const;
 
   return (
-    <main className="min-h-screen bg-[#fafaf9] px-5 py-8 pb-28 text-gray-950 sm:px-8 sm:py-12">
+    <main className="ec-operations-experience min-h-screen bg-[#fafaf9] px-5 py-8 pb-28 text-gray-950 sm:px-8 sm:py-12">
       <section className="mx-auto max-w-5xl space-y-7">
         <div className="mb-8">
           <DashboardLogo role="restaurant" />
         </div>
-        <header className="flex items-start justify-between gap-3">
+        <header className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <Link href="/restaurant/dashboard" className="mb-4 inline-flex min-h-11 items-center text-xs font-semibold text-gray-500">← Home</Link>
             <h1 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Operações</h1>
             <p className="mt-2 max-w-[15rem] text-sm leading-6 text-gray-500 sm:max-w-none">Todas as suas necessidades operacionais</p>
           </div>
-          <Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary mt-14 shrink-0 px-3 text-sm sm:px-5">
+          <Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary px-3 text-sm sm:px-5">
             <span aria-hidden="true">+</span> Nova Operação
           </Link>
         </header>
@@ -110,6 +110,7 @@ export default function RestaurantDemands() {
           />
         ) : visible.length ? (
           <>
+            <p className="text-sm text-gray-600">Confira as pendências, a próxima ação e a agenda de cada operação.</p>
             <div className="flex items-center justify-between">
               <p role="status" className="text-xs text-gray-500">{visible.length} {visible.length === 1 ? 'operação' : 'operações'}</p>
               <Button variant="ghost" onClick={() => setRetry((value) => value + 1)} className="px-0 text-xs text-gray-500">Atualizar</Button>

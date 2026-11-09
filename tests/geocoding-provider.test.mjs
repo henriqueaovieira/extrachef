@@ -112,12 +112,47 @@ test('Photon street matching tolerates accents, abbreviations and missing house 
   fetch.mock.mockImplementation(async () => Response.json(collection(
     feature({ postcode: '13520-000', city: 'São Pedro', housenumber: '' }))));
   assert.equal((await provider.geocode({ ...address, city: 'São Pedro', postal_code: '13520-123' })).latitude, -23.55,
-    'a city-wide CEP only needs the same 5-digit region');
-  await assert.rejects(provider.geocode({ ...address, city: 'São Pedro', postal_code: '13521-123' }),
-    error => error.code === 'not_found', 'a city-wide CEP from another region is rejected');
+    'a city-wide CEP in the same 5-digit region is accepted');
   fetch.mock.mockImplementation(async () => Response.json(collection(feature({ postcode: '01001-001' }))));
-  await assert.rejects(provider.geocode({ ...address, postal_code: '01001-002' }), error => error.code === 'not_found',
-    'specific CEPs must match exactly');
+  assert.equal((await provider.geocode({ ...address, postal_code: '01001-002' })).latitude, -23.55,
+    'a divergent CEP does not reject a matching street, city and UF');
+});
+
+test('Photon keeps the CEP out of the query and only uses it as a confidence signal', async t => {
+  const logs = quiet(t);
+  const provider = new PhotonProvider('https://geo.example', 1000);
+  const saoPedro = {
+    address: 'Rua Joaquim Antônio de Oliveira', number: '224', neighborhood: 'Mariluz',
+    city: 'São Pedro', state: 'SP', postal_code: '13522-348',
+  };
+  const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json(collection(feature({
+    street: undefined, housenumber: undefined, type: 'street', name: 'Rua Joaquim Antônio de Oliveira',
+    district: 'Jardim São Pedro', city: 'São Pedro', postcode: '13520-000',
+  }, [-47.8996883, -22.54339]))));
+  const result = await provider.geocode(saoPedro);
+  assert.equal(result.latitude, -22.54339, 'registered 13522-348 accepts returned 13520-000');
+  assert.equal(result.longitude, -47.8996883);
+  assert.equal(result.address.number, '');
+  const query = fetch.mock.calls[0].arguments[0].searchParams.get('q');
+  assert.doesNotMatch(query, /13522|348/);
+  assert.match(query, /Rua Joaquim Antônio de Oliveira, 224, Mariluz, São Pedro, São Paulo, Brasil/);
+  const warning = logs.warn.mock.calls.map(call => call.arguments[1])
+    .find(details => details.event === 'provider_postal_mismatch');
+  assert.deepEqual([warning?.expectedPostalCode, warning?.returnedPostalCode], ['13522348', '13520000']);
+
+  logs.warn.mock.resetCalls();
+  fetch.mock.mockImplementation(async () => Response.json(collection(
+    feature({ housenumber: '', postcode: '02002-000' }, [-46.70, -23.60]),
+    feature({ housenumber: '', postcode: '01001-000' }, [-46.63, -23.55]))));
+  assert.equal((await provider.geocode({ ...address, postal_code: '01001-000' })).latitude, -23.55,
+    'a matching CEP selects among distant street segments');
+  assert.equal(logs.warn.mock.calls.some(call => call.arguments[1]?.event === 'provider_postal_mismatch'), false);
+
+  for (const properties of [{ city: 'Campinas' }, { state: 'Rio de Janeiro' }, { street: 'Rua das Rosas' }]) {
+    fetch.mock.mockImplementation(async () => Response.json(collection(feature({ postcode: '01001-000', ...properties }))));
+    await assert.rejects(provider.geocode({ ...address, postal_code: '01001-000' }), error => error.code === 'not_found',
+      `a matching CEP never rescues ${JSON.stringify(properties)}`);
+  }
 });
 
 test('Photon rejects imprecise, wrong country/state/city, mismatched and ambiguous addresses', async t => {
@@ -127,7 +162,7 @@ test('Photon rejects imprecise, wrong country/state/city, mismatched and ambiguo
   for (const properties of [
     {}, { countrycode: 'US' }, { state: 'Rio de Janeiro' }, { city: 'Campinas' },
     { street: '' }, { street: 'Rua das Rosas' }, { housenumber: '121' },
-    { street: undefined, type: 'house', name: 'Rua das Flores' }, { postcode: '02002-000' },
+    { street: undefined, type: 'house', name: 'Rua das Flores' },
   ]) {
     fetch.mock.mockImplementation(async () => Response.json(collection(
       ...(Object.keys(properties).length ? [feature(properties)] : []))));

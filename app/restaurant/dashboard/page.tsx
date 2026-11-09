@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, EmptyState, LoadingSkeleton } from '@/app/components/ui';
+import { Badge, Button, Card, EmptyState, LoadingSkeleton, Toast } from '@/app/components/ui';
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -96,7 +96,7 @@ export default function RestaurantDashboard() {
   const [pageError, setPageError] = useState('');
   const [pendingError, setPendingError] = useState('');
   const [conversationError, setConversationError] = useState('');
-  const { counts } = useCommunication();
+  const { counts, chatError, error: communicationError } = useCommunication();
   const [operations, setOperations] = useState<OperationalAssignment[]>([]);
   const [reviews, setReviews] = useState<PendingReview[]>([]);
   const [operationsError, setOperationsError] = useState('');
@@ -352,9 +352,9 @@ export default function RestaurantDashboard() {
   const upcomingCount = operationCards.length - inProgressCount;
 
   return (
-    <main className="min-h-screen bg-white text-gray-950">
-      <header className="mx-auto max-w-2xl px-5 pt-8 sm:px-8 sm:pt-12">
-        <div className="mb-8 flex items-center justify-between">
+    <main className="ec-restaurant-home min-h-screen bg-gray-50 text-gray-950">
+      <header className="mx-auto w-full max-w-6xl px-4 pt-6 sm:px-6 sm:pt-8">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <DashboardLogo role="restaurant" />
           <div className="flex items-center gap-3">
             <NotificationBell iconOnly />
@@ -364,80 +364,71 @@ export default function RestaurantDashboard() {
               }} />
           </div>
         </div>
-        <h1 className="text-[1.75rem] font-semibold leading-tight tracking-[-0.045em] sm:text-4xl">Bem-vindo 👋</h1>
-        <p className="mt-2 text-lg font-semibold text-gray-900">{displayName}</p>
-        <p className="mt-2 text-sm text-gray-500 sm:text-base">Central Operacional do seu restaurante</p>
+        <p className="break-words text-sm text-gray-600">{displayName}</p>
+        <h1 className="mt-2 break-words text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">Sua central operacional</h1>
+        <p className="mt-2 text-sm text-gray-600">Acompanhe suas pendências e operações.</p>
       </header>
 
-      <section className="mx-auto max-w-2xl space-y-10 px-5 pt-10 pb-[calc(12rem+env(safe-area-inset-bottom))] sm:px-8">
-        <dl aria-label="Resumo operacional" className="grid grid-cols-3 gap-2 sm:gap-4">
-          {([
-            ['Operações em andamento', operationsLoading ? '—' : inProgressCount],
-            ['Próximas operações', loading ? '—' : upcomingCount],
-            ['Mensagens não lidas', counts.messages ?? '—'],
-          ] as const).map(([label, count]) => (
-            <div key={label} className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-5">
-              <dd className="text-2xl font-semibold tabular-nums sm:text-3xl">{count}</dd>
-              <dt className="mt-1 text-xs leading-4 text-gray-600 sm:text-sm">{label}</dt>
-            </div>
-          ))}
-        </dl>
+      <section className="mx-auto w-full max-w-6xl space-y-8 px-4 pt-6 pb-[calc(16rem+env(safe-area-inset-bottom))] sm:px-6">
         <Suspense fallback={null}><RouteFeedback /></Suspense>
+        {chatError && <Toast tone="danger">{chatError}</Toast>}
+        {communicationError && <Toast tone="danger">{communicationError}</Toast>}
         {pageError && (
-          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <Toast tone="danger">
             <p>{pageError}</p>
             <Button variant="ghost" onClick={() => setReloadKey((current) => current + 1)} className="mt-2 min-h-11 font-semibold underline">Tentar novamente</Button>
-          </div>
+          </Toast>
         )}
+        {operationsError && <Toast tone="danger">{operationsError}</Toast>}
         <section aria-labelledby="pending-heading" className="space-y-4">
           <h2 id="pending-heading" className="text-xl font-semibold tracking-tight sm:text-2xl">Ações pendentes</h2>
 
           {pendingError && (
-            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{pendingError}</p>
+            <Toast tone="danger">{pendingError}</Toast>
           )}
           {conversationError && (
-            <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{conversationError}</p>
+            <Toast tone="danger">{conversationError}</Toast>
           )}
           {loading ? (
             <LoadingSkeleton label="Carregando pendências..." />
           ) : pendingActions.length || reviews.length || operationActions.length ? (
-            <div className="divide-y divide-orange-100 rounded-2xl border border-orange-100 bg-orange-50/40 px-4 sm:px-5">
-              {reviews.map((review) => <article key={`review-${review.job_id}`} className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div><p className="font-semibold">Avaliação pendente · {review.title}</p><p className="mt-1 text-sm text-gray-600">Antes de criar uma nova operação, avalie sua última experiência.</p></div>
-                <div className="flex items-center"><Link href={`/reviews/${review.job_id}`} className="ec-button ec-button--primary px-4">Avaliar {review.reviewed_name}</Link><ProfessionalVerification jobId={review.job_id} /></div>
-              </article>)}
-              {operationActions.map((action) => <article key={`operation-${action.jobId}`} className="flex flex-wrap items-center justify-between gap-3 py-4">
-                <div><h3 className="font-semibold">{action.title}</h3><p className="mt-1 text-sm text-gray-600">{action.label}</p></div>
-                <Link href={action.href} className="ec-button ec-button--primary px-4">{action.label}</Link>
-              </article>)}
+            <div className="ec-restaurant-home__actions space-y-4">
+              {reviews.map((review) => <Card as="article" key={`review-${review.job_id}`} className="ec-restaurant-home__action flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 space-y-2"><Badge tone="warning">Avaliação pendente</Badge><h3 className="break-words text-lg font-semibold">{review.title}</h3><p className="text-sm text-gray-600">Antes de criar uma nova operação, avalie sua última experiência.</p></div>
+                <div className="flex min-w-0 items-center"><Link href={`/reviews/${review.job_id}`} className="ec-button ec-button--secondary min-w-0 flex-1 px-4 text-sm sm:flex-none">Avaliar {review.reviewed_name}</Link><ProfessionalVerification jobId={review.job_id} /></div>
+              </Card>)}
+              {operationActions.map((action) => <Card as="article" key={`operation-${action.jobId}`} className="ec-restaurant-home__action flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 space-y-2"><Badge tone="warning">Ação pendente</Badge><h3 className="break-words text-lg font-semibold">{action.title}</h3><p className="text-sm text-gray-600">{action.label}</p></div>
+                <Link href={action.href} className="ec-button ec-button--secondary px-4 text-sm">{action.label}</Link>
+              </Card>)}
               {pendingActions.slice(0, showAllActions ? pendingActions.length : 8).map((action) => (
-                <article key={action.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <Card as="article" key={action.id} className="ec-restaurant-home__action flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-start gap-3">
-                    <span aria-hidden="true" className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-full text-sm font-semibold ${action.kind === 'application' ? 'bg-orange-100 text-orange-900' : 'bg-blue-50 text-blue-800'}`}>
+                    <span aria-hidden="true" className="ec-restaurant-home__icon mt-1 grid size-8 shrink-0 place-items-center text-sm font-semibold">
                       {action.kind === 'application' ? '+' : action.kind === 'staffing' ? '!' : '…'}
                     </span>
                     <div className="min-w-0">
-                      <p className="font-semibold text-gray-950">
+                      <Badge tone="warning">
                         {action.kind === 'application' ? 'Novo candidato aguardando análise' : action.kind === 'staffing' ? 'Equipe incompleta' : 'Mensagem não lida'}
-                      </p>
-                      <p className="mt-0.5 truncate text-sm text-gray-600">
+                      </Badge>
+                      <p className="mt-2 break-words text-sm text-gray-700">
                         {action.person && <>{action.person}<ProfessionalVerification userId={action.workerId} jobId={action.jobId} />{' · '}</>}{action.demand}{action.kind !== 'staffing' ? ` · ${formatTime(action.createdAt)}` : ''}
                       </p>
-                      {action.kind !== 'application' && <p className="mt-1 line-clamp-2 text-sm text-gray-700">{action.detail}</p>}
+                      {action.kind !== 'application' && <p className="mt-2 break-words text-sm text-gray-600">{action.detail}</p>}
                     </div>
                   </div>
                   {action.kind === 'application' ? (
-                    <div className="flex shrink-0 items-center gap-3 pl-12 sm:pl-0">
-                      <Link href={`/restaurant/demands/${action.demandId || jobs.find((job) => job.id === action.jobId)?.demand_id || action.jobId}?view=candidates`} className="ec-button ec-button--primary px-4 text-sm">
+                    <div className="flex min-w-0 items-center">
+                      <Link href={`/restaurant/demands/${action.demandId || jobs.find((job) => job.id === action.jobId)?.demand_id || action.jobId}?view=candidates`} className="ec-button ec-button--secondary w-full px-4 text-sm">
                         Analisar e contratar
                       </Link>
                     </div>
                   ) : (
-                    <Link href={action.kind === 'staffing' ? `/restaurant/demands/${action.demandId}` : `/chat/${action.jobId}`} className="ml-12 inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 px-4 text-sm font-semibold text-gray-800 transition hover:bg-white sm:ml-0">
+                    <Link href={action.kind === 'staffing' ? `/restaurant/demands/${action.demandId}` : `/chat/${action.jobId}`} className="ec-button ec-button--secondary px-4 text-sm">
                       {action.kind === 'staffing' ? 'Ver candidatos' : 'Responder'}
                     </Link>
                   )}
-                </article>
+                </Card>
               ))}
               {pendingActions.length > 8 && (
                 <Button variant="ghost" aria-expanded={showAllActions} onClick={() => setShowAllActions((current) => !current)} className="inline-flex min-h-12 items-center px-0 text-sm font-semibold text-orange-800 hover:text-orange-950">
@@ -454,20 +445,18 @@ export default function RestaurantDashboard() {
         </section>
 
         <section aria-labelledby="operations-heading" className="space-y-4">
-          <h2 id="operations-heading" className="text-xl font-semibold">Operações</h2>
-          {loading ? <LoadingSkeleton label="Carregando operações..." /> : operationCards.length ? operationCards.map(({ id, job, inProgress }) => (
-            <Link key={id} href={`/restaurant/demands/${id}`} className="block rounded-2xl border border-gray-200 bg-white p-5 transition hover:border-gray-300">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${inProgress ? 'bg-emerald-50 text-emerald-800' : 'bg-orange-50 text-orange-900'}`}>
+          <h2 id="operations-heading" className="text-xl font-semibold">Operação em evidência</h2>
+          {loading ? <LoadingSkeleton label="Carregando operações..." /> : operationCards.length ? operationCards.map(({ id, job, inProgress }, index) => (
+            <Link key={id} href={`/restaurant/demands/${id}`} data-priority={index === 0 ? 'primary' : undefined} className="ec-card ec-restaurant-home__operation block space-y-3 transition">
+                <Badge tone={inProgress || job.status === 'filled' ? 'info' : 'warning'}>
                   {inProgress ? 'Em andamento' : jobStatusLabels[job.status] ?? 'Agendada'}
-                </span>
-                <span className="font-semibold">{job.value == null ? '—' : Number(job.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-              </div>
-              <h3 className="mt-3 text-lg font-semibold">{job.title}</h3>
-              <p className="mt-1 text-sm text-gray-600">{[job.work_address, job.work_number].filter(Boolean).join(', ') || job.location_name || 'Endereço não informado.'}</p>
+                </Badge>
+              <h3 className="break-words text-lg font-semibold">{job.title}</h3>
+              <p className="text-sm font-medium">{formatDate(job.job_date)} · {job.start_time.slice(0, 5)} às {job.end_time.slice(0, 5)}</p>
+              <p className="break-words text-sm text-gray-600">{[job.work_address, job.work_number].filter(Boolean).join(', ') || job.location_name || 'Endereço não informado.'}</p>
               {(job.work_city || job.work_state) && <p className="text-sm text-gray-600">{[job.work_city, job.work_state].filter(Boolean).join(' - ')}</p>}
-              <p className="mt-3 text-sm font-medium">{formatDate(job.job_date)}</p>
-              <p className="mt-1 text-sm text-gray-600">{job.start_time.slice(0, 5)} às {job.end_time.slice(0, 5)}</p>
+              <p className="text-sm tabular-nums text-gray-600">Diária: {job.value == null ? '—' : Number(job.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+              {index === 0 && <span className={`ec-button px-4 text-sm ${reviews.length || operationActions.length || pendingActions.length ? 'ec-button--secondary' : 'ec-button--primary'}`}>Ver operação <span aria-hidden="true">→</span></span>}
             </Link>
           )) : !pageError && <div><p className="font-medium">Nenhuma operação agendada.</p><p className="mt-1 text-sm text-gray-600">As próximas operações aparecerão aqui.</p></div>}
         </section>
@@ -477,35 +466,50 @@ export default function RestaurantDashboard() {
           {loading ? (
             <LoadingSkeleton label="Carregando conversas..." />
           ) : conversationError || pageError ? null : conversations.length ? (
-            <div className="divide-y divide-gray-200 rounded-2xl border border-gray-200 bg-white px-4 sm:px-5">
+            <Card className="divide-y divide-gray-200">
               {conversations.map((conversation) => (
-                <article key={conversation.jobId} className="relative flex min-h-[4.75rem] items-center gap-3 py-3 transition hover:bg-gray-50">
-                  <Link href={`/chat/${conversation.jobId}`} aria-label={`Conversa com ${conversation.person}`} className="absolute inset-0 rounded-xl focus-visible:outline-2 focus-visible:outline-orange-700" />
-                  <span aria-hidden="true" className="pointer-events-none grid size-10 shrink-0 place-items-center rounded-full bg-gray-100 text-sm font-semibold text-gray-700">
+                <article key={conversation.jobId} className="relative flex min-w-0 items-start gap-3 py-4 transition hover:bg-gray-50">
+                  <Link href={`/chat/${conversation.jobId}`} aria-label={`Conversa com ${conversation.person} sobre ${conversation.demand}`} className="absolute inset-0 rounded-xl" />
+                  <span aria-hidden="true" className="pointer-events-none grid size-8 shrink-0 place-items-center rounded-lg bg-gray-100 text-sm font-semibold text-gray-700">
                     {conversation.person.trim().charAt(0).toUpperCase()}
                   </span>
                   <span className="pointer-events-none min-w-0 flex-1">
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="flex items-center text-sm font-semibold text-gray-950"><span className="truncate">{conversation.person}</span><ProfessionalVerification userId={conversation.workerId} /></span>
-                      {conversation.createdAt && <span className="shrink-0 text-xs text-gray-500">{formatTime(conversation.createdAt)}</span>}
-                    </span>
-                    {conversation.content && <span className="mt-0.5 block truncate text-sm text-gray-600">{conversation.content}</span>}
+                    <span className="flex min-w-0 items-center text-sm font-semibold text-gray-950"><span className="min-w-0 break-words">{conversation.person}</span><ProfessionalVerification userId={conversation.workerId} /></span>
+                    <span className="mt-2 block break-words text-sm font-medium text-gray-800">{conversation.demand}</span>
+                    {conversation.content && <span className="mt-2 block break-words text-sm text-gray-600">{conversation.content}</span>}
+                    {conversation.createdAt && <span className="mt-2 block text-xs text-gray-600">{formatTime(conversation.createdAt)}</span>}
                   </span>
                 </article>
               ))}
-            </div>
+            </Card>
           ) : (
-            <div className="rounded-2xl border border-gray-200 bg-white px-5 py-6">
+            <Card>
               <p className="font-medium text-gray-800">Ainda não existem conversas.</p>
               <p className="mt-1 text-sm text-gray-600">As mensagens com profissionais contratados aparecerão aqui.</p>
-            </div>
+            </Card>
           )}
         </section>
 
+        <section aria-labelledby="summary-heading" className="ec-restaurant-home__summary space-y-4">
+          <h2 id="summary-heading" className="text-lg font-semibold text-gray-800">Resumo operacional</h2>
+          <dl aria-label="Resumo operacional" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {([
+              ['Operações em andamento', operationsLoading ? '—' : inProgressCount],
+              ['Próximas operações', loading ? '—' : upcomingCount],
+              ['Mensagens não lidas', counts.messages ?? '—'],
+            ] as const).map(([label, count]) => (
+              <div key={label} className="ec-card min-w-0">
+                <dt className="break-words text-xs text-gray-600">{label}</dt>
+                <dd className="mt-2 break-words text-lg font-semibold tabular-nums text-gray-700">{count}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
       </section>
-      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 flex justify-center bg-gradient-to-t from-white via-white/95 to-white/0 px-5 pt-6 pb-4 sm:px-8">
-        <Link href="/restaurant/dashboard/jobs/create" className="ec-button ec-button--primary pointer-events-auto mx-auto flex min-h-14 w-full max-w-xl items-center justify-center rounded-2xl text-base shadow-lg shadow-orange-900/10">
-          <span aria-hidden="true" className="text-2xl font-normal">+</span> Criar Operação
+      <div className="ec-restaurant-home__create pointer-events-none fixed inset-x-0 z-30 flex justify-center bg-gray-50 px-4 py-2 sm:px-6">
+        <Link href="/restaurant/dashboard/jobs/create" className={`ec-button pointer-events-auto mx-auto w-full max-w-xl px-4 text-sm ${loading || operationsLoading || pageError || operationsError || pendingError || conversationError || reviews.length || operationActions.length || pendingActions.length || operationCards.length ? 'ec-button--secondary' : 'ec-button--primary'}`}>
+          <span aria-hidden="true" className="text-xl font-normal">+</span> Criar Operação
         </Link>
       </div>
       <MobileBottomNav role="restaurant" showOnDesktop />
