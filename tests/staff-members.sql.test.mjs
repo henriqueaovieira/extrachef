@@ -30,6 +30,7 @@ test('staff membership is isolated from marketplace roles and audited transactio
     '20261110010000_staff_foundation.sql',
     '20261110020000_admin_audit_log.sql',
     '20261110030000_staff_functions.sql',
+    '20261110040000_admin_preservation.sql',
   ]) await db.exec(source(migration));
 
   await db.exec(`
@@ -126,6 +127,59 @@ test('staff membership is isolated from marketplace roles and audited transactio
       /Admin audit events are append-only/,
     );
     await assert.rejects(db.query('DELETE FROM private.admin_audit_log'), /Admin audit events are append-only/);
+  });
+
+  await t.test('Admin Preservation blocks last-admin transitions and revalidates the actor', async () => {
+    const expectPreservationConflict = async (nextRole, nextStatus) => {
+      await assert.rejects(
+        db.query(
+          "SELECT private.assert_admin_preservation('admin', 'active', $1::private.staff_role, $2::private.staff_status)",
+          [nextRole, nextStatus],
+        ),
+        (error) => error.code === '23514',
+      );
+    };
+
+    await db.exec('RESET ROLE');
+    await expectPreservationConflict('reviewer', 'active');
+    await expectPreservationConflict('admin', 'revoked');
+    const adminCount = async () => Number(await scalar(
+      "SELECT count(*) FROM private.staff_members WHERE staff_role = 'admin' AND status = 'active'",
+    ));
+    assert.equal(await adminCount(), 1);
+
+    await login(id(1));
+    await db.query(
+      'SELECT public.grant_staff_role($1, $2, $3)',
+      [id(5), 'admin', 'Add second administrator'],
+    );
+    await db.query(
+      'SELECT public.grant_staff_role($1, $2, $3)',
+      [id(5), 'reviewer', 'Downgrade while another administrator remains'],
+    );
+    await db.exec('RESET ROLE');
+    assert.equal(await adminCount(), 1);
+
+    await login(id(5));
+    await assert.rejects(
+      db.query(
+        'SELECT public.grant_staff_role($1, $2, $3)',
+        [id(4), 'support', 'Former administrator must be denied'],
+      ),
+      /Admin access required/,
+    );
+
+    await login(id(1));
+    await db.query(
+      'SELECT public.grant_staff_role($1, $2, $3)',
+      [id(5), 'admin', 'Restore second administrator'],
+    );
+    await db.query(
+      'SELECT public.revoke_staff_role($1, $2)',
+      [id(5), 'Revoke while another administrator remains'],
+    );
+    await db.exec('RESET ROLE');
+    assert.equal(await adminCount(), 1);
   });
 
   await t.test('anonymous callers cannot execute staff functions', async () => {
