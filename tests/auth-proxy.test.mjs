@@ -67,9 +67,13 @@ test('profile lookup and provisioning errors are explicit, never a worker fallba
   await assert.rejects(getAccountRole(invalidMetadata, 'test-user', true), /concluir seu cadastro/);
 });
 
-function proxyWith({ user = null, authError = null, role = 'worker', roleError = null, thrown = false } = {}) {
+function proxyWith({
+  user = null, authError = null, role = 'worker', roleError = null,
+  staffMembership = null, staffError = null, thrown = false,
+} = {}) {
   return loadTs('../proxy.ts', {
     '@/lib/auth/routes': routes,
+    '@/lib/auth/staff-access': loadTs('../lib/auth/staff-access.ts'),
     '@/lib/supabase/request': {
       createRequestClient: () => ({
         supabase: {
@@ -78,6 +82,10 @@ function proxyWith({ user = null, authError = null, role = 'worker', roleError =
               if (thrown) throw new TypeError('simulated transport failure');
               return { data: { user }, error: authError };
             },
+          },
+          rpc: async (name) => {
+            assert.equal(name, 'get_staff_membership');
+            return { data: staffMembership, error: staffError };
           },
           from: () => ({
             select: () => ({
@@ -159,6 +167,28 @@ test('Auth, database and transport outages fail closed without declaring session
     assert.equal(response.status, 503);
     assert.equal(response.headers.has('location'), false);
   }
+});
+
+test('admin paths use staff membership instead of public.users.role', async () => {
+  const response = await proxyWith({
+    user: { id: 'staff-user' },
+    staffMembership: { role: 'reviewer', status: 'active' },
+  })(new NextRequest('https://app.test/admin'));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-middleware-next'), '1');
+});
+
+test('admin paths deny non-staff and fail closed when staff authorization is unavailable', async () => {
+  const denied = await proxyWith({ user: { id: 'worker-user' } })(
+    new NextRequest('https://app.test/admin'),
+  );
+  assert.equal(denied.status, 403);
+
+  const unavailable = await proxyWith({
+    user: { id: 'staff-user' },
+    staffError: { code: 'unavailable' },
+  })(new NextRequest('https://app.test/admin'));
+  assert.equal(unavailable.status, 503);
 });
 
 test('request client forwards refreshed cookies and preserves all updates on redirects', () => {

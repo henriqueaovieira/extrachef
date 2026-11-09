@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   canAccessPath, dashboardFor, isAccountRole, isProtectedPath, loginHref, sanitizeRedirect,
 } from '../lib/auth/routes.ts';
+import { isStaffPath } from '../lib/auth/staff-access.ts';
 
 test('all requested protected namespaces include their root and descendants', () => {
   for (const root of [
@@ -16,6 +17,9 @@ test('all requested protected namespaces include their root and descendants', ()
   for (const path of ['/', '/login', '/register', '/auth/callback', '/api/push/receipt', '/sw.js']) {
     assert.equal(isProtectedPath(path), false, path);
   }
+  assert.equal(isStaffPath('/admin'), true);
+  assert.equal(isStaffPath('/admin/staff'), true);
+  assert.equal(isStaffPath('/administrator'), false);
 });
 
 test('roles have explicit dashboards and cannot access the opposite namespace', () => {
